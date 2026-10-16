@@ -15,10 +15,88 @@ public class GameSettingData
     public bool showMouseCursor;
 }
 
+// 쳇바퀴 1대의 장치·화면 연결.
+[Serializable]
+public class WheelConfig
+{
+    // 쳇바퀴 번호 (1, 2). 랭킹 파일과 화면 표시에 쓴다.
+    public int wheelId = 1;
+    // RPM 센서 컨트롤러 id (port.json 의 controllerId)
+    public int controllerId = 1;
+    // 32형 터치모니터 디스플레이 번호 (0 = Display 1)
+    public int displayIndex;
+    // 장치 없이 시험할 때 누르고 있으면 달리는 키 (KeyCode 이름)
+    public string simulateKey = "UpArrow";
+}
+
+// 송전전압 1종의 계수. 실제 값이 아니라 체험용 가상 계수.
+[Serializable]
+public class VoltageOption
+{
+    public string id = "high";
+    // 화면 표시 이름
+    public string label = "높은 전압";
+    // 송전 중 손실 비율 (0~1). 도착 전력 = 출발 전력 × (1 - lossRate)
+    public float lossRate = 0.05f;
+    // 승압·강압 설비 비용(원). 판매금액에서 뺀다. 적게 보내면 고전압이 오히려 불리해지도록 둔다.
+    public float facilityCostWon;
+}
+
 // 프로젝트별로 실행 중에 바뀌는 데이터를 담는 곳 (Setting.json).
+// 달려라! 전력 챌린지 운영값. 숫자는 모두 임시값이며 현장·한전 의견에 맞춰 바꾼다.
 [Serializable]
 public class GameDynamicData
 {
+    // 발전 체험 시간(초)
+    public float runSeconds = 180f;
+    // 시작 카운트다운(초)
+    public int countdownSeconds = 3;
+
+    // 센서 롤러 1회전당 펄스 수
+    public int pulsesPerRevolution = 1;
+    // 센서가 붙은 롤러 둘레(m). 펄스당 이동거리 = 둘레 / 펄스 수
+    public float rollerCircumferenceM = 0.5f;
+    // RPM 방식에서 이 시간(초) 동안 새 값이 없으면 멈춘 것으로 본다 (펄스 방식은 증가가 없으면 자동으로 0)
+    public float sensorStopSeconds = 1f;
+    // 속도 표시 평활 시간(초)
+    public float speedSmoothingSeconds = 0.3f;
+    // 이 속도(km/h)를 넘는 펄스 증가는 잡음으로 보고 무시
+    public float maxValidSpeedKmh = 40f;
+    // 시뮬레이션 키를 누르고 있을 때의 속도(km/h)
+    public float simulateSpeedKmh = 12f;
+
+    // 환산 발전출력(W) = min(maxWatt, 속도(km/h) × wattPerKmh)
+    public float wattPerKmh = 15f;
+    public float maxWatt = 300f;
+
+    // 판매 환산: "이 속도로 saleScaleMinutes 분 달렸을 때" 의 발전량으로 계산
+    public float saleScaleMinutes = 60f;
+    // 기준 판매단가 (원/kWh, SMP 범위 내 임시값)
+    public float smpWonPerKWh = 150f;
+    public List<VoltageOption> voltages = new List<VoltageOption>
+    {
+        new VoltageOption { id = "low", label = "낮은 전압", lossRate = 0.30f, facilityCostWon = 0f },
+        new VoltageOption { id = "high", label = "높은 전압", lossRate = 0.05f, facilityCostWon = 3f },
+    };
+
+    // 송전 시뮬레이션 연출 시간(초)
+    public float transmitSeconds = 6f;
+
+    // 선택 화면 등에서 무입력 시 대기화면 복귀(초). 0 이하이면 사용 안 함.
+    public float idleTimeoutSeconds = 60f;
+    // 결과·정산 화면 자동 넘김(초)
+    public float resultAutoCloseSeconds = 20f;
+    // 랭킹 표시 인원
+    public int rankingShowCount = 10;
+
+    // 쳇바퀴별 연결 (PC 1대에 쳇바퀴 2대)
+    public List<WheelConfig> wheels = new List<WheelConfig>
+    {
+        new WheelConfig { wheelId = 1, controllerId = 1, displayIndex = 0, simulateKey = "UpArrow" },
+        new WheelConfig { wheelId = 2, controllerId = 2, displayIndex = 1, simulateKey = "W" },
+    };
+    // 85형 관전 화면 디스플레이 번호
+    public int spectatorDisplayIndex = 2;
 }
 
 [Serializable]
@@ -67,6 +145,8 @@ public class JsonManager : MonoBehaviour
     private string tcpPath;
 
     public string GameDataPath => gameDataPath;
+    // 설정 파일이 모여 있는 폴더 (설정창에 표시용)
+    public static string ConfigFolder => Application.persistentDataPath;
 
     // 싱글톤을 초기화하고 JSON 파일에서 런타임 설정 데이터를 불러옵니다.
     private void Awake()
@@ -82,20 +162,63 @@ public class JsonManager : MonoBehaviour
             return;
         }
 
-        portPath = Path.Combine(Application.streamingAssetsPath, "port.json");
-        tcpPath = Path.Combine(Application.streamingAssetsPath, "tcp.json");
-        gameDynamicDataPath = Path.Combine(Application.streamingAssetsPath, "Setting.json");
-        gameDataPath = Path.Combine(Application.persistentDataPath, "gameSettingData.json");
+        // 설정 파일은 모두 persistentDataPath 에 둔다 (빌드를 덮어써도 현장 값 유지).
+        // StreamingAssets 의 같은 이름 파일은 첫 실행 때 복사해 오는 기본값 원본이다.
+        portPath = Path.Combine(ConfigFolder, "port.json");
+        tcpPath = Path.Combine(ConfigFolder, "tcp.json");
+        gameDynamicDataPath = Path.Combine(ConfigFolder, "Setting.json");
+        gameDataPath = Path.Combine(ConfigFolder, "gameSettingData.json");
 
         gameSettingData ??= new GameSettingData();
         gameDynamicData ??= new GameDynamicData();
         portJson ??= new PortJson();
         tcpJson ??= new TcpJson();
 
-        gameSettingData = LoadData(gameDataPath, gameSettingData);
-        gameDynamicData = LoadData(gameDynamicDataPath, gameDynamicData);
-        portJson = LoadData(portPath, portJson);
-        tcpJson = LoadData(tcpPath, tcpJson);
+        gameSettingData = LoadConfig(gameDataPath, gameSettingData);
+        gameDynamicData = LoadConfig(gameDynamicDataPath, gameDynamicData);
+        portJson = LoadConfig(portPath, portJson);
+        tcpJson = LoadConfig(tcpPath, tcpJson);
+        Debug.Log($"설정 폴더: {ConfigFolder}");
+    }
+
+    // persistentDataPath 설정 파일을 읽는다.
+    // 없으면 StreamingAssets 의 같은 이름 파일을 복사해 오고, 그것도 없으면 코드 기본값으로 만든다.
+    // 읽은 뒤 다시 저장해서 새로 추가된 필드도 파일에 기본값으로 채운다.
+    // 읽기에 실패하면 기본값으로 실행한다 (파일은 덮어쓰지 않음).
+    public static T LoadConfig<T>(string path, T data) where T : new()
+    {
+        if (data == null) data = new T();
+
+        try
+        {
+            if (!File.Exists(path))
+            {
+                string source = Path.Combine(Application.streamingAssetsPath, Path.GetFileName(path));
+                if (File.Exists(source))
+                {
+                    Directory.CreateDirectory(Path.GetDirectoryName(path));
+                    File.Copy(source, path);
+                    Debug.Log($"기본 설정 복사: {source} -> {path}");
+                }
+            }
+
+            data = LoadData(path, data);
+        }
+        catch (Exception ex)
+        {
+            Debug.LogError($"설정 파일 읽기 실패 - 기본값으로 실행: {path}\n{ex.Message}");
+            return data;
+        }
+
+        try { SaveData(data, path); }
+        catch (Exception ex) { Debug.LogError($"설정 파일 저장 실패: {path}\n{ex.Message}"); }
+        return data;
+    }
+
+    // 현재 운영값(Setting.json)을 저장한다. 설정창에서 숫자 값을 바꿨을 때 호출.
+    public void SaveGameDynamicData()
+    {
+        SaveData(gameDynamicData, gameDynamicDataPath);
     }
 
     // 현재 게임 설정 데이터를 gameSettingData.json 파일에 저장합니다.

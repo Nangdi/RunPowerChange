@@ -195,7 +195,8 @@ MonoBehaviour:
   m_text: "\uC1A1\uC218\uC2E0 \uB85C\uADF8 (Send / Receive)"
   m_isRightToLeft: 0
   m_fontAsset: {fileID: 11400000, guid: 721f15b6dabcb2d4285b268f7a5767ad, type: 2}
-  m_sharedMaterial: {fileID: -8642118467712979661, guid: 721f15b6dabcb2d4285b268f7a5767ad, type: 2}
+  m_sharedMaterial: {fileID: -8642118467712979661, guid: 721f15b6dabcb2d4285b268f7a5767ad,
+    type: 2}
   m_fontSharedMaterials: []
   m_fontMaterial: {fileID: 0}
   m_fontMaterials: []
@@ -342,7 +343,7 @@ Canvas:
   m_AdditionalShaderChannelsFlag: 25
   m_UpdateRectTransformForStandalone: 0
   m_SortingLayerID: 0
-  m_SortingOrder: 0
+  m_SortingOrder: 200
   m_TargetDisplay: 0
 --- !u!114 &1789114356636905148
 MonoBehaviour:
@@ -407,6 +408,7 @@ MonoBehaviour:
   clearButton: {fileID: 2001897349288434286}
   togglePanel: {fileID: 2656396563035667339}
   toggleKey: 27
+  hideOnStart: 1
   maxLogLines: 200
   openColor: {r: 0.4, g: 1, b: 0.4, a: 1}
   closeColor: {r: 1, g: 0.4, b: 0.4, a: 1}
@@ -515,7 +517,8 @@ MonoBehaviour:
   m_text: 
   m_isRightToLeft: 0
   m_fontAsset: {fileID: 11400000, guid: 721f15b6dabcb2d4285b268f7a5767ad, type: 2}
-  m_sharedMaterial: {fileID: -8642118467712979661, guid: 721f15b6dabcb2d4285b268f7a5767ad, type: 2}
+  m_sharedMaterial: {fileID: -8642118467712979661, guid: 721f15b6dabcb2d4285b268f7a5767ad,
+    type: 2}
   m_fontSharedMaterials: []
   m_fontMaterial: {fileID: 0}
   m_fontMaterials: []
@@ -650,7 +653,8 @@ MonoBehaviour:
   m_text: "Ctrl 5  (\uB300\uAE30 \uC911...)"
   m_isRightToLeft: 0
   m_fontAsset: {fileID: 11400000, guid: 721f15b6dabcb2d4285b268f7a5767ad, type: 2}
-  m_sharedMaterial: {fileID: -8642118467712979661, guid: 721f15b6dabcb2d4285b268f7a5767ad, type: 2}
+  m_sharedMaterial: {fileID: -8642118467712979661, guid: 721f15b6dabcb2d4285b268f7a5767ad,
+    type: 2}
   m_fontSharedMaterials:
   - {fileID: 0}
   m_fontMaterial: {fileID: 0}
@@ -807,7 +811,8 @@ MonoBehaviour:
   m_text: "Ctrl 4  (\uB300\uAE30 \uC911...)"
   m_isRightToLeft: 0
   m_fontAsset: {fileID: 11400000, guid: 721f15b6dabcb2d4285b268f7a5767ad, type: 2}
-  m_sharedMaterial: {fileID: -8642118467712979661, guid: 721f15b6dabcb2d4285b268f7a5767ad, type: 2}
+  m_sharedMaterial: {fileID: -8642118467712979661, guid: 721f15b6dabcb2d4285b268f7a5767ad,
+    type: 2}
   m_fontSharedMaterials:
   - {fileID: 0}
   m_fontMaterial: {fileID: 0}
@@ -1071,7 +1076,8 @@ MonoBehaviour:
   m_text: "Ctrl 3  (\uB300\uAE30 \uC911...)"
   m_isRightToLeft: 0
   m_fontAsset: {fileID: 11400000, guid: 721f15b6dabcb2d4285b268f7a5767ad, type: 2}
-  m_sharedMaterial: {fileID: -8642118467712979661, guid: 721f15b6dabcb2d4285b268f7a5767ad, type: 2}
+  m_sharedMaterial: {fileID: -8642118467712979661, guid: 721f15b6dabcb2d4285b268f7a5767ad,
+    type: 2}
   m_fontSharedMaterials:
   - {fileID: 0}
   m_fontMaterial: {fileID: 0}
@@ -1630,7 +1636,8 @@ MonoBehaviour:
   m_text: "RS232 \uBAA8\uB2C8\uD130"
   m_isRightToLeft: 0
   m_fontAsset: {fileID: 11400000, guid: 721f15b6dabcb2d4285b268f7a5767ad, type: 2}
-  m_sharedMaterial: {fileID: 0}
+  m_sharedMaterial: {fileID: -8642118467712979661, guid: 721f15b6dabcb2d4285b268f7a5767ad,
+    type: 2}
   m_fontSharedMaterials:
   - {fileID: 0}
   m_fontMaterial: {fileID: 0}
@@ -2083,7 +2090,8 @@ MonoBehaviour:
   m_text: "Ctrl 1  (\uB300\uAE30 \uC911...)"
   m_isRightToLeft: 0
   m_fontAsset: {fileID: 11400000, guid: 721f15b6dabcb2d4285b268f7a5767ad, type: 2}
-  m_sharedMaterial: {fileID: -8642118467712979661, guid: 721f15b6dabcb2d4285b268f7a5767ad, type: 2}
+  m_sharedMaterial: {fileID: -8642118467712979661, guid: 721f15b6dabcb2d4285b268f7a5767ad,
+    type: 2}
   m_fontSharedMaterials:
   - {fileID: 0}
   m_fontMaterial: {fileID: 0}
@@ -2239,7 +2247,8 @@ MonoBehaviour:
   m_text: "\uB85C\uADF8 \uC9C0\uC6B0\uAE30"
   m_isRightToLeft: 0
   m_fontAsset: {fileID: 11400000, guid: 721f15b6dabcb2d4285b268f7a5767ad, type: 2}
-  m_sharedMaterial: {fileID: -8642118467712979661, guid: 721f15b6dabcb2d4285b268f7a5767ad, type: 2}
+  m_sharedMaterial: {fileID: -8642118467712979661, guid: 721f15b6dabcb2d4285b268f7a5767ad,
+    type: 2}
   m_fontSharedMaterials: []
   m_fontMaterial: {fileID: 0}
   m_fontMaterials: []
@@ -2516,7 +2525,8 @@ MonoBehaviour:
   m_text: "Ctrl 2  (\uB300\uAE30 \uC911...)"
   m_isRightToLeft: 0
   m_fontAsset: {fileID: 11400000, guid: 721f15b6dabcb2d4285b268f7a5767ad, type: 2}
-  m_sharedMaterial: {fileID: -8642118467712979661, guid: 721f15b6dabcb2d4285b268f7a5767ad, type: 2}
+  m_sharedMaterial: {fileID: -8642118467712979661, guid: 721f15b6dabcb2d4285b268f7a5767ad,
+    type: 2}
   m_fontSharedMaterials:
   - {fileID: 0}
   m_fontMaterial: {fileID: 0}

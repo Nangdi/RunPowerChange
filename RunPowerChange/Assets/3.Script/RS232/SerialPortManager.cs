@@ -12,6 +12,8 @@ public class SerialPortManager : MonoBehaviour
     public event Action<int, string> OnDataReceived;
     public event Action<int, string> OnDataSent;
     public event Action<int, bool> OnConnectionChanged;
+    // 수신 데이터 해석 결과(인식됨/무시됨과 이유). 로그 패널이 구독한다.
+    public event Action<int, string> OnInterpreted;
 
     public bool IsControllerOpen(int controllerId)
     {
@@ -89,6 +91,14 @@ public class SerialPortManager : MonoBehaviour
     protected virtual void ReceivedData(int controllerId, string data)
     {
         // 상속받은 클래스에서 프로젝트별 처리 구현
+    }
+
+    // 상속 클래스가 수신 해석 결과를 로그 패널과 콘솔에 남길 때 쓴다.
+    protected void ReportInterpretation(int controllerId, string message, bool warning = false)
+    {
+        if (warning) Debug.LogWarning($"[Ctrl {controllerId}] {message}");
+        else Debug.Log($"[Ctrl {controllerId}] {message}");
+        OnInterpreted?.Invoke(controllerId, message);
     }
 
     // 특정 컨트롤러의 포트로 송신

@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Text;
 using TMPro;
@@ -21,6 +21,7 @@ public class SerialPortLogPanel : MonoBehaviour
 
     [Header("토글 (ESC 키로 표시/숨김)")]
     [SerializeField] private GameObject togglePanel;
+    [Tooltip("씬에 설정창(SettingsPanelUI)이 있으면 이 키 대신 설정창과 함께 열리고 닫힌다.")]
     [SerializeField] private KeyCode toggleKey = KeyCode.Escape;
     [Tooltip("시작할 때 로그 창을 숨긴 상태로 둘지 여부.")]
     [SerializeField] private bool hideOnStart = true;
@@ -47,6 +48,15 @@ public class SerialPortLogPanel : MonoBehaviour
 
         if (hideOnStart && togglePanel != null)
             togglePanel.SetActive(false);
+
+        // 설정창과 같은 키로 함께 열리고 닫힌다
+        SettingsPanelUI.PanelVisibilityChanged += HandleSettingsVisibility;
+        if (SettingsPanelUI.Exists) HandleSettingsVisibility(SettingsPanelUI.IsVisible);
+    }
+
+    private void HandleSettingsVisibility(bool show)
+    {
+        if (togglePanel != null) togglePanel.SetActive(show);
     }
 
     private void Update()
@@ -54,7 +64,7 @@ public class SerialPortLogPanel : MonoBehaviour
         // SerialPortManager.Instance가 늦게 만들어지는 경우 대비
         if (!subscribed) TrySubscribe();
 
-        if (Input.GetKeyDown(toggleKey) && togglePanel != null)
+        if (!SettingsPanelUI.Exists && Input.GetKeyDown(toggleKey) && togglePanel != null)
         {
             togglePanel.SetActive(!togglePanel.activeSelf);
         }
@@ -63,10 +73,12 @@ public class SerialPortLogPanel : MonoBehaviour
     private void OnDestroy()
     {
         if (clearButton != null) clearButton.onClick.RemoveListener(ClearLog);
+        SettingsPanelUI.PanelVisibilityChanged -= HandleSettingsVisibility;
         if (!subscribed || manager == null) return;
         manager.OnDataReceived -= HandleReceived;
         manager.OnDataSent -= HandleSent;
         manager.OnConnectionChanged -= HandleConnectionChanged;
+        manager.OnInterpreted -= HandleInterpreted;
         subscribed = false;
     }
 
@@ -79,12 +91,14 @@ public class SerialPortLogPanel : MonoBehaviour
         manager.OnDataReceived += HandleReceived;
         manager.OnDataSent += HandleSent;
         manager.OnConnectionChanged += HandleConnectionChanged;
+        manager.OnInterpreted += HandleInterpreted;
         subscribed = true;
         RefreshAllStatus();
     }
 
     private void HandleReceived(int id, string data) => AppendLog($"[Receive][Ctrl {id}] {data}");
     private void HandleSent(int id, string data) => AppendLog($"[Send][Ctrl {id}] {data}");
+    private void HandleInterpreted(int id, string message) => AppendLog($"[Parse][Ctrl {id}] {message}");
 
     private void HandleConnectionChanged(int id, bool isOpen)
     {

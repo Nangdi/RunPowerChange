@@ -1,6 +1,8 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Reflection;
+using TMPro;
 using UnityEngine;
 using UnityEngine.Events;
 using UnityEngine.UI;
@@ -14,8 +16,27 @@ using UnityEngine.UI;
 //  2) 씬의 설정창에 Toggle 오브젝트를 하나 만든다.
 //  3) 아래 boolSettings 목록에 (필드 이름, Toggle)을 연결한다.
 // 저장/복원은 리플렉션으로 처리되므로 이 스크립트를 고칠 필요가 없다.
+//
+// [숫자 설정을 추가하는 방법] (Setting.json = GameDynamicData 의 float/int 필드)
+//  1) 씬의 설정창에 TMP_InputField 를 하나 만든다.
+//  2) 아래 numberSettings 목록에 (필드 이름, InputField, 최소/최대)를 연결한다.
+// 입력을 마치면 범위를 맞춰 persistentDataPath/Setting.json 에 바로 저장한다.
 public class SettingsPanelUI : MonoBehaviour
 {
+    // Setting.json 의 숫자 필드 1개와 씬의 InputField 1개를 연결하는 항목.
+    [Serializable]
+    public class NumberSetting
+    {
+        [Tooltip("GameDynamicData 안의 float/int 필드 이름 (예: runSeconds)")]
+        public string fieldName;
+        public TMP_InputField input;
+        public float min = 0f;
+        public float max = 9999f;
+
+        [NonSerialized] public FieldInfo field;
+        [NonSerialized] public UnityAction<string> handler;
+    }
+
     // gameSettingData.json 의 bool 필드 1개와 씬의 Toggle 1개를 연결하는 항목.
     [Serializable]
     public class BoolSetting
@@ -43,11 +64,23 @@ public class SettingsPanelUI : MonoBehaviour
     [Header("설정 토글 (gameSettingData.json 의 bool 필드)")]
     [SerializeField] private List<BoolSetting> boolSettings = new List<BoolSetting>();
 
+    [Header("숫자 설정 (Setting.json 의 float/int 필드)")]
+    [SerializeField] private List<NumberSetting> numberSettings = new List<NumberSetting>();
+
     [Header("적용 대상 (비워두면 자동 탐색)")]
     [SerializeField] private UnityAlwaysOnTop alwaysOnTop;
 
     // 설정이 바뀔 때 (필드 이름, 새 값)을 알린다. 프로젝트별 반영 처리는 여기에 붙인다.
     public event Action<string, bool> OnSettingChanged;
+    // 숫자 설정이 바뀔 때 (필드 이름, 새 값)
+    public event Action<string, float> OnNumberChanged;
+
+    // 설정창이 열리고 닫힐 때 알린다. 디버그 패널(SerialPortLogPanel)이 같은 키로 함께 열리고 닫히도록 따라온다.
+    public static event Action<bool> PanelVisibilityChanged;
+    // 씬에 설정창이 있으면 디버그 패널은 자기 키를 쓰지 않고 설정창을 따른다.
+    public static bool Exists => instanceCount > 0;
+    public static bool IsVisible { get; private set; }
+    private static int instanceCount;
 
     // 데이터 -> UI 반영 중에는 onValueChanged 콜백이 저장을 유발하지 않도록 막는다.
     private bool _syncing;
@@ -58,7 +91,17 @@ public class SettingsPanelUI : MonoBehaviour
             alwaysOnTop = FindObjectOfType<UnityAlwaysOnTop>();
 
         BindFields();
+        BindNumberFields();
         SyncFromData();
+
+        foreach (var setting in numberSettings)
+        {
+            if (setting == null || setting.field == null || setting.input == null) continue;
+
+            var captured = setting;
+            captured.handler = text => OnNumberEdited(captured, text);
+            captured.input.onEndEdit.AddListener(captured.handler);
+        }
 
         foreach (var setting in boolSettings)
         {
@@ -73,6 +116,9 @@ public class SettingsPanelUI : MonoBehaviour
             SetPanelVisible(false);
     }
 
+    private void OnEnable() => instanceCount++;
+    private void OnDisable() => instanceCount--;
+
     private void OnDestroy()
     {
         foreach (var setting in boolSettings)
@@ -80,6 +126,14 @@ public class SettingsPanelUI : MonoBehaviour
             if (setting == null || setting.toggle == null || setting.handler == null) continue;
 
             setting.toggle.onValueChanged.RemoveListener(setting.handler);
+            setting.handler = null;
+        }
+
+        foreach (var setting in numberSettings)
+        {
+            if (setting == null || setting.input == null || setting.handler == null) continue;
+
+            setting.input.onEndEdit.RemoveListener(setting.handler);
             setting.handler = null;
         }
     }
@@ -144,6 +198,8 @@ public class SettingsPanelUI : MonoBehaviour
     {
         if (panelRoot != null)
             panelRoot.SetActive(show);
+        IsVisible = show;
+        PanelVisibilityChanged?.Invoke(show);
 
         if (show)
         {
@@ -164,19 +220,83 @@ public class SettingsPanelUI : MonoBehaviour
         else Cursor.visible = show;
     }
 
-    // 현재 gameSettingData -> 토글 UI 반영
+    // 현재 gameSettingData / gameDynamicData -> 토글·입력칸 UI 반영
     public void SyncFromData()
     {
-        var data = JsonManager.instance != null ? JsonManager.instance.gameSettingData : null;
-        if (data == null) return;
+        var jm = JsonManager.instance;
+        if (jm == null) return;
 
         _syncing = true;
         foreach (var setting in boolSettings)
         {
-            if (setting == null || setting.field == null || setting.toggle == null) continue;
-            setting.toggle.isOn = (bool)setting.field.GetValue(data);
+            if (setting == null || setting.field == null || setting.toggle == null || jm.gameSettingData == null) continue;
+            setting.toggle.isOn = (bool)setting.field.GetValue(jm.gameSettingData);
+        }
+        foreach (var setting in numberSettings)
+        {
+            if (setting == null || setting.field == null || setting.input == null || jm.gameDynamicData == null) continue;
+            setting.input.SetTextWithoutNotify(FormatNumber(setting.field.GetValue(jm.gameDynamicData)));
         }
         _syncing = false;
+    }
+
+    // 인스펙터에 적은 필드 이름을 GameDynamicData 의 float/int 필드와 연결한다.
+    private void BindNumberFields()
+    {
+        var type = typeof(GameDynamicData);
+        foreach (var setting in numberSettings)
+        {
+            if (setting == null) continue;
+            setting.field = null;
+
+            var field = string.IsNullOrEmpty(setting.fieldName) ? null : type.GetField(setting.fieldName, BindingFlags.Public | BindingFlags.Instance);
+            if (field == null)
+            {
+                Debug.LogError($"[Settings] GameDynamicData 에 '{setting.fieldName}' 필드가 없습니다.", this);
+                continue;
+            }
+            if (field.FieldType != typeof(float) && field.FieldType != typeof(int))
+            {
+                Debug.LogError($"[Settings] '{setting.fieldName}' 은 float/int 가 아니라 {field.FieldType.Name} 입니다.", this);
+                continue;
+            }
+            if (setting.input == null)
+            {
+                Debug.LogWarning($"[Settings] '{setting.fieldName}' 에 연결된 InputField 가 없습니다.", this);
+                continue;
+            }
+
+            setting.field = field;
+        }
+    }
+
+    private void OnNumberEdited(NumberSetting setting, string text)
+    {
+        if (_syncing) return;
+
+        var jm = JsonManager.instance;
+        if (jm == null || setting.field == null) return;
+
+        if (!float.TryParse(text, NumberStyles.Float, CultureInfo.InvariantCulture, out float value))
+        {
+            Debug.LogWarning($"[Settings] '{setting.fieldName}' 숫자가 아님: '{text}' - 이전 값 유지", this);
+            SyncFromData();
+            return;
+        }
+
+        value = Mathf.Clamp(value, setting.min, setting.max);
+        object boxed = setting.field.FieldType == typeof(int) ? (object)Mathf.RoundToInt(value) : value;
+        setting.field.SetValue(jm.gameDynamicData, boxed);
+        jm.SaveGameDynamicData();               // persistentDataPath/Setting.json 에 바로 저장
+        SyncFromData();                         // 범위 보정된 값 표시
+
+        Debug.Log($"[Settings] {setting.fieldName} = {boxed}");
+        OnNumberChanged?.Invoke(setting.fieldName, value);
+    }
+
+    private static string FormatNumber(object value)
+    {
+        return value is float f ? f.ToString("0.##", CultureInfo.InvariantCulture) : Convert.ToString(value, CultureInfo.InvariantCulture);
     }
 
     // gameSettingData 의 bool 값 하나를 읽는다. 필드가 없거나 데이터가 없으면 fallback.
