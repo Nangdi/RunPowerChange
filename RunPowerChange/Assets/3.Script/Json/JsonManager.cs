@@ -21,7 +21,7 @@ public class WheelConfig
 {
     // 쳇바퀴 번호 (1, 2). 랭킹 파일과 화면 표시에 쓴다.
     public int wheelId = 1;
-    // RPM 센서 컨트롤러 id (port.json 의 controllerId)
+    // 회전 센서 컨트롤러 id (port.json 의 controllerId)
     public int controllerId = 1;
     // 32형 터치모니터 디스플레이 번호 (0 = Display 1)
     public int displayIndex;
@@ -48,46 +48,54 @@ public class VoltageOption
 public class GameDynamicData
 {
     // 발전 체험 시간(초)
-    public float runSeconds = 180f;
+    public float runSeconds = 50f;
     // 시작 카운트다운(초)
     public int countdownSeconds = 3;
+    // 체험 안내 화면 자동 넘김(초)
+    public float guideSeconds = 12f;
+    // 캐릭터 선택 화면 자동 넘김(초). 고르지 않으면 기본 캐릭터.
+    public float characterSelectSeconds = 12f;
+    // 한 명이 시작한 뒤 다른 쳇바퀴가 같은 회차로 합류할 수 있는 시간(초)
+    public float joinWaitSeconds = 15f;
 
-    // 센서 롤러 1회전당 펄스 수
-    public int pulsesPerRevolution = 1;
-    // 센서가 붙은 롤러 둘레(m). 펄스당 이동거리 = 둘레 / 펄스 수
-    public float rollerCircumferenceM = 0.5f;
-    // RPM 방식에서 이 시간(초) 동안 새 값이 없으면 멈춘 것으로 본다 (펄스 방식은 증가가 없으면 자동으로 0)
-    public float sensorStopSeconds = 1f;
+    // 쳇바퀴 1회전 이동거리(m). 컨트롤러가 1회전마다 신호를 보내면 이만큼 거리를 더한다. (직경 2m → 6.283)
+    public float wheelCircumferenceM = 6.283f;
+    // 이 시간(초) 동안 회전 신호가 없으면 멈춘 것으로 본다. 길수록 천천히 걸어도 속도가 0으로 떨어지지 않는다.
+    public float rotationStopSeconds = 5f;
     // 속도 표시 평활 시간(초)
     public float speedSmoothingSeconds = 0.3f;
-    // 이 속도(km/h)를 넘는 펄스 증가는 잡음으로 보고 무시
+    // 직전 회전과의 간격이 이 속도(km/h)보다 빠르게 환산되면 센서 튐(잡음)으로 보고 무시
     public float maxValidSpeedKmh = 40f;
-    // 시뮬레이션 키를 누르고 있을 때의 속도(km/h)
-    public float simulateSpeedKmh = 12f;
+    // 정지 후 첫 회전 신호는 속도를 아직 모르므로, 화면 캐릭터가 그 1회전 거리를 이 시간(초)에 걸쳐 걸어간다
+    public float firstRotationSeconds = 2f;
 
     // 환산 발전출력(W) = min(maxWatt, 속도(km/h) × wattPerKmh)
     public float wattPerKmh = 15f;
     public float maxWatt = 300f;
 
-    // 판매 환산: "이 속도로 saleScaleMinutes 분 달렸을 때" 의 발전량으로 계산
-    public float saleScaleMinutes = 60f;
+    // 판매 환산: "이 속도로 saleScaleMinutes 분 달렸을 때" 의 발전량으로 계산 (시안: 100시간)
+    public float saleScaleMinutes = 6000f;
     // 기준 판매단가 (원/kWh, SMP 범위 내 임시값)
     public float smpWonPerKWh = 150f;
     public List<VoltageOption> voltages = new List<VoltageOption>
     {
         new VoltageOption { id = "low", label = "낮은 전압", lossRate = 0.30f, facilityCostWon = 0f },
-        new VoltageOption { id = "high", label = "높은 전압", lossRate = 0.05f, facilityCostWon = 3f },
+        new VoltageOption { id = "high", label = "높은 전압", lossRate = 0.05f, facilityCostWon = 300f },
     };
 
     // 송전 시뮬레이션 연출 시간(초)
-    public float transmitSeconds = 6f;
+    public float transmitSeconds = 20f;
 
     // 선택 화면 등에서 무입력 시 대기화면 복귀(초). 0 이하이면 사용 안 함.
     public float idleTimeoutSeconds = 60f;
     // 결과·정산 화면 자동 넘김(초)
-    public float resultAutoCloseSeconds = 20f;
+    public float resultAutoCloseSeconds = 15f;
     // 랭킹 표시 인원
-    public int rankingShowCount = 10;
+    public int rankingShowCount = 5;
+    // 85형 레코드 라인으로 보여 줄 오늘 상위 기록 수 (1위는 1인 체험 고스트로도 쓴다)
+    public int recordLineCount = 3;
+    // 85형 새 랭킹 팝업 표시 시간(초)
+    public float rankingPopupSeconds = 6f;
 
     // 쳇바퀴별 연결 (PC 1대에 쳇바퀴 2대)
     public List<WheelConfig> wheels = new List<WheelConfig>
@@ -219,6 +227,12 @@ public class JsonManager : MonoBehaviour
     public void SaveGameDynamicData()
     {
         SaveData(gameDynamicData, gameDynamicDataPath);
+    }
+
+    // 포트 설정(port.json)을 저장한다. 디버그 패널에서 COM 포트를 바꿨을 때 호출.
+    public void SavePortJson()
+    {
+        SaveData(portJson, portPath);
     }
 
     // 현재 게임 설정 데이터를 gameSettingData.json 파일에 저장합니다.

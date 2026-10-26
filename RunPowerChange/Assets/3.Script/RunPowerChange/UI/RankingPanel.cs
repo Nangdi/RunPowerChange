@@ -1,28 +1,52 @@
 using System.Collections.Generic;
 using UnityEngine;
 
-// 랭킹 목록이 있는 결과 패널 공통
+// 랭킹 표가 있는 패널 공통. 줄은 RankRowView 프리팹으로 필요한 만큼 만든다.
 public abstract class RankingPanel : WheelPanel
 {
-    [Header("랭킹 목록 (표시 인원은 Setting.json rankingShowCount)")]
+    [Header("랭킹 표 (표시 인원은 Setting.json rankingShowCount)")]
     [SerializeField] private RankRowView rowPrefab;
     [SerializeField] private Transform rowRoot;
+    [Tooltip("내 기록이 상위 밖일 때 상위 목록과 내 줄 사이에 보이는 표시. 비워두면 표시하지 않음")]
+    [SerializeField] private GameObject gapMark;
 
     private readonly List<RankRowView> rows = new List<RankRowView>();
 
-    protected void SetRows(WheelRankingStore.Kind kind, List<PowerRecord> top, PowerRecord mine)
+    // top 은 순위순 목록. mine 이 top 밖이면 myRank 와 함께 마지막 줄로 붙인다.
+    protected void SetRows(WheelRankingStore.Kind kind, List<PowerRecord> top, PowerRecord mine, int myRank)
+    {
+        RankTable.Fill(rows, rowPrefab, rowRoot, gapMark, kind, top, mine, myRank);
+    }
+}
+
+// 랭킹 표 채우기 (32형 결과 화면과 85형 관전 화면이 같이 쓴다)
+public static class RankTable
+{
+    public static void Fill(List<RankRowView> rows, RankRowView rowPrefab, Transform rowRoot, GameObject gapMark,
+        WheelRankingStore.Kind kind, List<PowerRecord> top, PowerRecord mine, int myRank)
     {
         if (rowPrefab == null || rowRoot == null) return;
 
         int count = top != null ? top.Count : 0;
-        while (rows.Count < count)
-            rows.Add(Instantiate(rowPrefab, rowRoot));
+        bool mineOutside = mine != null && (top == null || !top.Contains(mine));
+        int total = count + (mineOutside ? 1 : 0);
+        while (rows.Count < total)
+            rows.Add(Object.Instantiate(rowPrefab, rowRoot));
 
         for (int i = 0; i < rows.Count; i++)
         {
-            bool on = i < count;
+            bool on = i < total;
             rows[i].gameObject.SetActive(on);
-            if (on) rows[i].Set(RankOf(kind, top, i), top[i], kind, top[i] == mine);
+            if (!on) continue;
+
+            if (i < count) rows[i].Set(RankOf(kind, top, i), top[i], top[i] == mine);
+            else rows[i].Set(myRank, mine, true);
+        }
+
+        if (gapMark != null)
+        {
+            gapMark.SetActive(mineOutside);
+            if (mineOutside) gapMark.transform.SetSiblingIndex(count);
         }
     }
 

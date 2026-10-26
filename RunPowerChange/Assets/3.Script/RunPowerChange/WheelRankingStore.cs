@@ -8,8 +8,14 @@ public class PowerRecord
 {
     // 기록 시각 (DateTime.Ticks, 로컬 시간). 이름 대신 종료 시각으로 표시한다.
     public long ticks;
-    // 발전왕 기준: 체험 중 누적 환산 발전량 (Wh)
+    public int wheelId;
+    // 발전왕 기준: 체험 중 실제 누적 발전량 (Wh). 순위 비교에만 쓴다.
     public float energyWh;
+    // 화면 표시용 누적 환산 발전량 (Wh) = 송전 출발 전력
+    public float scaledEnergyWh;
+    public float maxSpeedKmh;
+    // 송전 중 손실 (Wh)
+    public float lossWh;
     // 판매왕 기준: 판매금액 (원)
     public float saleWon;
     public float arrivedWh;
@@ -92,6 +98,21 @@ public class WheelRankingStore
     }
 
     public List<PowerRecord> GetTop(Kind kind, int count) => GetTopWith(kind, null, count);
+
+    // 여러 쳇바퀴의 오늘 기록을 합친 상위 목록 (85형 관전 화면용)
+    public static List<PowerRecord> MergeTop(IEnumerable<WheelRankingStore> stores, Kind kind, int count)
+    {
+        var list = new List<PowerRecord>();
+        foreach (var s in stores)
+            if (s != null) list.AddRange(s.GetTop(kind, -1));
+        list.Sort((a, b) =>
+        {
+            int c = ValueOf(b, kind).CompareTo(ValueOf(a, kind));
+            return c != 0 ? c : a.ticks.CompareTo(b.ticks);
+        });
+        if (count >= 0 && list.Count > count) list.RemoveRange(count, list.Count - count);
+        return list;
+    }
 
     // 아직 저장하지 않은 기록(extra)을 끼워 넣은 상위 목록. 발전 결과 화면의 미리보기용.
     public List<PowerRecord> GetTopWith(Kind kind, PowerRecord extra, int count)

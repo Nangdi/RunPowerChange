@@ -28,6 +28,14 @@ public static class PowerModel
         return Mathf.Clamp(speedKmh * cfg.wattPerKmh, 0f, Mathf.Max(0f, cfg.maxWatt));
     }
 
+    // 시안의 "누적 환산 발전량"(Wh): 지금까지의 평균 출력으로 saleScaleMinutes 동안 달렸을 때의 발전량.
+    // 달리는 동안 0에서 시작해 늘어나고, 끝나는 순간 송전 출발 전력(Sell 의 sentWh)과 같아진다.
+    public static float ScaledEnergyWh(float energyWh, float runSeconds, GameDynamicData cfg)
+    {
+        float duration = Mathf.Max(1f, cfg.runSeconds);
+        return Mathf.Max(0f, energyWh) * Mathf.Max(0f, cfg.saleScaleMinutes) * 60f / duration;
+    }
+
     // 체험 중 평균 출력(W) = 누적 발전량 / 경과 시간
     public static float AverageWatt(float energyWh, float seconds)
     {

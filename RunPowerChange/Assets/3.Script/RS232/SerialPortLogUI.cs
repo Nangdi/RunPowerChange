@@ -8,7 +8,7 @@ public class SerialPortLogUI : MonoBehaviour
 {
     [Header("표시 설정")]
     [SerializeField] private bool visible = true;
-    [SerializeField] private KeyCode toggleKey = KeyCode.F1;
+    [SerializeField] private KeyCode toggleKey = KeyCode.F2; // F1 은 단축키 도움말
     [SerializeField] private int maxLogLines = 200;
     [SerializeField] private int panelWidth = 520;
     [SerializeField] private int panelMargin = 10;
@@ -31,6 +31,7 @@ public class SerialPortLogUI : MonoBehaviour
     private void Start()
     {
         TrySubscribe();
+        ShortcutHelp.Register(this, toggleKey, "RS232 간이 로그(OnGUI) 열기/닫기", "모든 화면");
     }
 
     private void Update()
@@ -55,6 +56,7 @@ public class SerialPortLogUI : MonoBehaviour
 
     private void OnDestroy()
     {
+        ShortcutHelp.Unregister(this);
         if (!subscribed || manager == null) return;
         manager.OnDataReceived -= HandleReceived;
         manager.OnDataSent -= HandleSent;

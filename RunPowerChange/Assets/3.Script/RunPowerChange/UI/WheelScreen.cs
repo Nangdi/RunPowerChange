@@ -9,18 +9,19 @@ public class WheelScreen : MonoBehaviour
     [SerializeField] private WheelSession session;
     [SerializeField] private Canvas canvas;
 
-    [Header("패널 (WheelSession.State 순서)")]
+    [Header("패널")]
     [SerializeField] private IdlePanel idlePanel;
+    [SerializeField] private WaitNextPanel waitNextPanel;
     [SerializeField] private GuidePanel guidePanel;
+    [SerializeField] private CharacterSelectPanel characterSelectPanel;
     [SerializeField] private CountdownPanel countdownPanel;
     [SerializeField] private RunPanel runPanel;
     [SerializeField] private RunResultPanel runResultPanel;
     [SerializeField] private VoltagePanel voltagePanel;
     [SerializeField] private TransmitPanel transmitPanel;
-    [SerializeField] private SaleResultPanel saleResultPanel;
-    [SerializeField] private SummaryPanel summaryPanel;
-    [SerializeField] private EndPanel endPanel;
+    [SerializeField] private ResultPanel resultPanel;
 
+    // WheelSession.State 순서. Ready(선택 후 대기)는 캐릭터 선택 화면을 그대로 쓴다.
     private WheelPanel[] panels;
     private WheelPanel current;
 
@@ -28,8 +29,8 @@ public class WheelScreen : MonoBehaviour
     {
         panels = new WheelPanel[]
         {
-            idlePanel, guidePanel, countdownPanel, runPanel, runResultPanel,
-            voltagePanel, transmitPanel, saleResultPanel, summaryPanel, endPanel,
+            idlePanel, waitNextPanel, guidePanel, characterSelectPanel, characterSelectPanel, countdownPanel,
+            runPanel, runResultPanel, voltagePanel, transmitPanel, resultPanel,
         };
         foreach (var panel in panels)
         {

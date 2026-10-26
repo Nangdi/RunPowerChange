@@ -47,28 +47,75 @@ public class SerialPortManager : MonoBehaviour
         {
             Debug.Log($"포트 설정 로드됨: id={cfg.controllerId}, COM={cfg.com}, Baud={cfg.baudLate}, enabled={cfg.enabled}");
 
-            // 컨트롤러별 RS232 사용 여부 - 비활성 시 채널 생성/포트 오픈 자체를 건너뜀
-            if (!cfg.enabled)
-            {
-                Debug.Log($"[Ctrl {cfg.controllerId}] RS232 비활성 - 포트 열지 않음 ({cfg.com})");
-                continue;
-            }
-
             // 동일 controllerId 중복 시 첫 번째만 사용
             if (FindChannel(cfg.controllerId) != null)
             {
                 Debug.LogWarning($"중복된 controllerId 무시: {cfg.controllerId}");
                 continue;
             }
-
-            var channel = new SerialPortChannel(
-                cfg.controllerId, cfg.com, cfg.baudLate,
-                OnChannelMessage,
-                OnChannelSent,
-                OnChannelConnectionChanged);
-            channels.Add(channel);
-            channel.Open();
+            OpenChannel(cfg);
         }
+    }
+
+    // port.json 항목 1개로 채널을 만들어 연다. 비활성/포트 없음이면 열지 않는다.
+    private void OpenChannel(PortConfig cfg)
+    {
+        // 컨트롤러별 RS232 사용 여부 - 비활성 시 채널 생성/포트 오픈 자체를 건너뜀
+        if (!cfg.enabled || string.IsNullOrEmpty(cfg.com))
+        {
+            Debug.Log($"[Ctrl {cfg.controllerId}] RS232 사용 안 함 - 포트 열지 않음 ({cfg.com})");
+            OnConnectionChanged?.Invoke(cfg.controllerId, false);
+            return;
+        }
+
+        var channel = new SerialPortChannel(
+            cfg.controllerId, cfg.com, cfg.baudLate,
+            OnChannelMessage,
+            OnChannelSent,
+            OnChannelConnectionChanged);
+        channels.Add(channel);
+        channel.Open();
+    }
+
+    // 컨트롤러 1개의 포트를 닫고 port.json 의 현재 값으로 다시 연다 (디버그 패널에서 COM 을 바꿨을 때).
+    public void ReopenController(int controllerId)
+    {
+        var old = FindChannel(controllerId);
+        if (old != null)
+        {
+            old.Close();
+            channels.Remove(old);
+        }
+
+        var cfg = FindPortConfig(controllerId);
+        if (cfg == null)
+        {
+            Debug.LogWarning($"[Ctrl {controllerId}] port.json 에 설정 없음 - 다시 열지 않음");
+            return;
+        }
+        OpenChannel(cfg);
+    }
+
+    // port.json 의 모든 컨트롤러 포트를 닫고 다시 연다 (재연결 버튼).
+    public void ReconnectAll()
+    {
+        Cleanup();
+        var portJson = JsonManager.instance.portJson;
+        if (portJson?.ports == null) return;
+        foreach (var cfg in portJson.ports)
+        {
+            if (FindChannel(cfg.controllerId) != null) continue;
+            OpenChannel(cfg);
+        }
+    }
+
+    private static PortConfig FindPortConfig(int controllerId)
+    {
+        var portJson = JsonManager.instance != null ? JsonManager.instance.portJson : null;
+        if (portJson?.ports == null) return null;
+        foreach (var cfg in portJson.ports)
+            if (cfg.controllerId == controllerId) return cfg;
+        return null;
     }
 
     private void OnChannelMessage(int controllerId, string data)
@@ -111,6 +158,15 @@ public class SerialPortManager : MonoBehaviour
             return;
         }
         channel.Send(message);
+    }
+
+    // 열린 모든 포트로 송신
+    public void SendDataToAll(string message)
+    {
+        for (int i = 0; i < channels.Count; i++)
+        {
+            if (channels[i].IsOpen) channels[i].Send(message);
+        }
     }
 
     protected SerialPortChannel FindChannel(int controllerId)

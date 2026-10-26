@@ -13,7 +13,8 @@ public static class PowerUIValidator
     {
         int problems = 0;
 
-        foreach (string panel in PanelNames)
+        var staticNames = new System.Collections.Generic.List<string>(PanelNames) { SpectatorName };
+        foreach (string panel in staticNames)
         {
             if (AssetDatabase.LoadAssetAtPath<Sprite>(StaticSpritePath(panel)) == null)
                 problems += Report($"정적 레이어 이미지가 없습니다: {StaticSpritePath(panel)}", null);
@@ -34,6 +35,18 @@ public static class PowerUIValidator
             problems += Report("씬에 Canvas_Wheel 이 없습니다. '1. 프리팹 생성 및 씬 적용'을 실행하세요.", null);
         else if (screens.Length != sessions.Length)
             problems += Report($"쳇바퀴 세션 {sessions.Length}개, 화면 {screens.Length}개로 수가 다릅니다.", null);
+
+        var spectators = Object.FindObjectsOfType<SpectatorScreen>(true);
+        if (spectators.Length != 1)
+            problems += Report($"씬에 85형 관전 캔버스(Canvas_Spectator)가 {spectators.Length}개 있습니다. 1개여야 합니다.", null);
+        foreach (var spectator in spectators)
+            problems += CheckReferences(spectator.gameObject);
+        if (Object.FindObjectsOfType<GameRound>(true).Length != 1)
+            problems += Report("씬에 GameRound 가 1개 있어야 합니다. '5. 3D 경주 장면 만들기'를 실행하세요.", null);
+        foreach (var runner in Object.FindObjectsOfType<RaceRunner>(true))
+            problems += CheckReferences(runner.gameObject);
+        foreach (var cam in Object.FindObjectsOfType<RaceCamera>(true))
+            if (cam.name != "Camera_Spectator_Bg") problems += CheckReferences(cam.gameObject);
 
         foreach (var screen in screens)
         {
@@ -80,11 +93,26 @@ public static class PowerUIValidator
             {
                 if (property.propertyType != SerializedPropertyType.ObjectReference) continue;
                 if (property.name == "m_Script" || property.objectReferenceValue != null) continue;
+                if (IsOptional(behaviour.GetType(), property.name)) continue;
 
                 problems += Report($"{GetPath(behaviour.transform)} ({behaviour.GetType().Name}): '{property.displayName}' 연결이 비어 있습니다.", behaviour);
             }
         }
         return problems;
+    }
+
+    // [Tooltip] 에 "비워두면" 이 들어간 필드는 비어 있어도 되는 연결이다
+    private static bool IsOptional(System.Type type, string fieldName)
+    {
+        for (var t = type; t != null; t = t.BaseType)
+        {
+            var field = t.GetField(fieldName, System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.Public |
+                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.DeclaredOnly);
+            if (field == null) continue;
+            var tip = (TooltipAttribute)System.Attribute.GetCustomAttribute(field, typeof(TooltipAttribute));
+            return tip != null && tip.tooltip.Contains("비워두면");
+        }
+        return false;
     }
 
     private static string GetPath(Transform t)

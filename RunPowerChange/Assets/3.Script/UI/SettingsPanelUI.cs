@@ -114,6 +114,8 @@ public class SettingsPanelUI : MonoBehaviour
 
         if (hideOnStart)
             SetPanelVisible(false);
+
+        ShortcutHelp.Register(this, toggleKey, "설정창 + RS232 디버그 패널 열기/닫기", "모든 화면, Display 1에 표시");
     }
 
     private void OnEnable() => instanceCount++;
@@ -121,6 +123,8 @@ public class SettingsPanelUI : MonoBehaviour
 
     private void OnDestroy()
     {
+        ShortcutHelp.Unregister(this);
+
         foreach (var setting in boolSettings)
         {
             if (setting == null || setting.toggle == null || setting.handler == null) continue;

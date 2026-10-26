@@ -9,7 +9,8 @@ using UnityEngine.UI;
 using static PowerUIKit;
 
 // 임시 스프라이트와 디자이너용 가이드 이미지를 PNG로 만든다.
-//  - Static/Static_xxx.png : 패널별 정적 레이어 (PowerStaticLayouts 내용을 렌더링)
+//  - Static/Static_xxx.png : 패널별 정적 레이어 (PowerStaticLayouts 내용을 렌더링, 배경 투명 - 뒤에 3D 장면이 보인다)
+//                            Static_Spectator.png 는 85형 세로 화면(1080x1920)
 //  - Parts/*.png           : 카드 배경, 버튼, 게이지 등 동적 요소용 부품
 //  - _Guide/Guide_xxx.png  : 정적 레이어 위에 동적 요소 자리를 표시한 작업 가이드
 // 디자인 PNG로 같은 경로의 파일을 덮어쓰면 씬/프리팹 수정 없이 바로 반영된다.
@@ -18,10 +19,18 @@ public static class PowerSpriteExporter
     // 둥근 박스 부품 (9-slice). radius가 곧 slice 테두리 크기.
     private static readonly (string name, Color color, int radius)[] ShapeParts =
     {
-        ("Card_Bg", CardColor, 16),
-        ("Gauge_Bg", Color.white, 12),     // 게이지 바탕과 채움. 색은 프리팹이 칠한다
-        ("RankRow_Bg", Color.white, 8),    // 색은 프리팹이 칠한다
+        ("Card_Bg", Color.white, 24),      // 카드·알약 배경. 색은 프리팹이 칠한다
+        ("Gauge_Bg", Color.white, 40),     // 게이지 바탕과 채움 (양 끝 둥근 바). 색은 프리팹이 칠한다
+        ("RankRow_Bg", Color.white, 12),   // 색은 프리팹이 칠한다
     };
+
+    // 흰 원 (남은 시간 원형 게이지, 카운트다운 원). 색은 프리팹이 칠한다
+    private const string CircleName = "Circle";
+    private const int CircleSize = 256;
+    // 선택 테두리 (속이 빈 둥근 사각, 9-slice). 색은 프리팹이 칠한다
+    private const string FrameName = "Frame_Bg";
+    private const int FrameRadius = 32;
+    private const int FrameThickness = 8;
 
     private const string DotName = "Dot"; // 흰 원. 색은 프리팹이 칠한다
     private const int DotSize = 64;
@@ -41,7 +50,8 @@ public static class PowerSpriteExporter
     public static void ExportGuides()
     {
         EnsureFolder(GuideDir);
-        foreach (string panel in PanelNames)
+        var all = new System.Collections.Generic.List<string>(PanelNames) { SpectatorName };
+        foreach (string panel in all)
         {
             var prefab = AssetDatabase.LoadAssetAtPath<GameObject>(PanelPrefabPath(panel));
             if (prefab == null)
@@ -50,7 +60,9 @@ public static class PowerSpriteExporter
                 continue;
             }
 
-            Texture2D tex = Render(ScreenWidth, ScreenHeight, false, root => DrawGuide(root, prefab));
+            bool spectator = panel == SpectatorName;
+            int w = spectator ? SpectatorWidth : ScreenWidth, h = spectator ? SpectatorHeight : ScreenHeight;
+            Texture2D tex = Render(w, h, false, root => DrawGuide(root, prefab, w, h));
             WritePng(GuidePath(panel), tex, 0);
         }
         Debug.Log($"가이드 PNG 생성 완료: {GuideDir}");
@@ -63,11 +75,28 @@ public static class PowerSpriteExporter
         EnsureFolder(PartsDir);
         int count = 0;
 
+        // 둥근 부품을 먼저 만든다 (정적 레이어 렌더링이 Card_Bg 를 쓴다)
+        foreach (var shape in ShapeParts)
+        {
+            string path = PartSpritePath(shape.name);
+            if (!overwrite && File.Exists(path)) continue;
+            int size = shape.radius * 2 + 2;
+            WritePng(path, RoundRect(size, size, shape.radius, shape.color), shape.radius);
+            count++;
+        }
+
         foreach (var pair in PowerStaticLayouts.Panels)
         {
             string path = StaticSpritePath(pair.Key);
             if (!overwrite && File.Exists(path)) continue;
-            WritePng(path, Render(ScreenWidth, ScreenHeight, false, pair.Value), 0);
+            WritePng(path, Render(ScreenWidth, ScreenHeight, true, pair.Value), 0);
+            count++;
+        }
+
+        string spectatorPath = StaticSpritePath(SpectatorName);
+        if (overwrite || !File.Exists(spectatorPath))
+        {
+            WritePng(spectatorPath, Render(SpectatorWidth, SpectatorHeight, true, PowerStaticLayouts.Spectator), 0);
             count++;
         }
 
@@ -79,19 +108,25 @@ public static class PowerSpriteExporter
             count++;
         }
 
-        foreach (var shape in ShapeParts)
-        {
-            string path = PartSpritePath(shape.name);
-            if (!overwrite && File.Exists(path)) continue;
-            int size = shape.radius * 2 + 2;
-            WritePng(path, RoundRect(size, size, shape.radius, shape.color), shape.radius);
-            count++;
-        }
-
         string dotPath = PartSpritePath(DotName);
         if (overwrite || !File.Exists(dotPath))
         {
             WritePng(dotPath, RoundRect(DotSize, DotSize, DotSize / 2, Color.white), 0);
+            count++;
+        }
+
+        string circlePath = PartSpritePath(CircleName);
+        if (overwrite || !File.Exists(circlePath))
+        {
+            WritePng(circlePath, RoundRect(CircleSize, CircleSize, CircleSize / 2, Color.white), 0);
+            count++;
+        }
+
+        string framePath = PartSpritePath(FrameName);
+        if (overwrite || !File.Exists(framePath))
+        {
+            int size = FrameRadius * 2 + 2;
+            WritePng(framePath, RoundRing(size, size, FrameRadius, FrameThickness, Color.white), FrameRadius);
             count++;
         }
 
@@ -101,7 +136,7 @@ public static class PowerSpriteExporter
 
     #region 가이드
 
-    private static void DrawGuide(RectTransform root, GameObject panelPrefab)
+    private static void DrawGuide(RectTransform root, GameObject panelPrefab, int width, int height)
     {
         var panel = (RectTransform)UnityEngine.Object.Instantiate(panelPrefab, root).transform;
         panel.name = panelPrefab.name;
@@ -114,7 +149,7 @@ public static class PowerSpriteExporter
         }
 
         var legend = CreateText(root, "Legend", "■ 분홍 박스 = 동적 요소 자리 (정적 PNG에 그리지 말 것)",
-            new Vector2(0, ScreenHeight * 0.5f - 20), new Vector2(ScreenWidth, 40), 24, GuideColor, true);
+            new Vector2(0, height * 0.5f - 20), new Vector2(width, 40), 24, GuideColor, true);
         legend.alignment = TextAlignmentOptions.Center;
     }
 
@@ -268,6 +303,30 @@ public static class PowerSpriteExporter
             float dist = new Vector2(Mathf.Max(q.x, 0f), Mathf.Max(q.y, 0f)).magnitude - radius;
             float coverage = Mathf.Clamp01(0.5f - dist);
             pixels[y * width + x] = new Color(color.r, color.g, color.b, color.a * coverage);
+        }
+
+        tex.SetPixels(pixels);
+        tex.Apply();
+        return tex;
+    }
+
+    // 안티에일리어싱된 둥근 사각 테두리 (속이 빔)
+    private static Texture2D RoundRing(int width, int height, int radius, int thickness, Color color)
+    {
+        var tex = new Texture2D(width, height, TextureFormat.RGBA32, false);
+        var pixels = new Color[width * height];
+        Vector2 half = new Vector2(width, height) * 0.5f;
+        Vector2 inner = half - Vector2.one * radius;
+
+        for (int y = 0; y < height; y++)
+        for (int x = 0; x < width; x++)
+        {
+            Vector2 p = new Vector2(x + 0.5f, y + 0.5f) - half;
+            Vector2 q = new Vector2(Mathf.Abs(p.x) - inner.x, Mathf.Abs(p.y) - inner.y);
+            float dist = new Vector2(Mathf.Max(q.x, 0f), Mathf.Max(q.y, 0f)).magnitude + Mathf.Min(Mathf.Max(q.x, q.y), 0f) - radius;
+            float outer = Mathf.Clamp01(0.5f - dist);
+            float innerCut = Mathf.Clamp01(0.5f - (-dist - thickness));
+            pixels[y * width + x] = new Color(color.r, color.g, color.b, color.a * outer * innerCut);
         }
 
         tex.SetPixels(pixels);

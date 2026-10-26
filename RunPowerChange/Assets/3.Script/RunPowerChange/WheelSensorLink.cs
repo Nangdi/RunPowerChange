@@ -1,10 +1,15 @@
 using System;
 using System.Collections.Generic;
-using System.Globalization;
 using UnityEngine;
 
 // 쳇바퀴 1대의 센서 상태. 속도와 앱 시작 후 누적 이동거리를 들고 있다.
 // 세션은 시작 시점의 TotalDistanceM 을 기억해 두고 차이로 체험 거리를 계산한다.
+//
+// 센서는 쳇바퀴가 1회전할 때마다 신호 1개를 보낸다 (1회전 = wheelCircumferenceM).
+// 신호가 몇 초 간격으로 띄엄띄엄 오므로
+//  - 속도: 직전 두 회전의 간격으로 계산하고, 다음 회전이 늦어지면 (둘레 / 경과시간)으로 줄여 간다.
+//  - 거리: 회전마다 둘레만큼 한 번에 뛰지 않도록 속도로 적분해 보여 주되,
+//          확인된 회전 수(CountedDistanceM)를 넘지 않게 하고, 1회전 넘게 뒤처지면 순간이동 없이 서서히 따라잡는다.
 public class WheelSensor
 {
     public int WheelId { get; }
@@ -14,25 +19,23 @@ public class WheelSensor
     // 표시용으로 평활한 속도 (m/s)
     public float SpeedMps { get; private set; }
     public float SpeedKmh => SpeedMps * 3.6f;
-    // 앱 시작 후 누적 이동거리 (m). 줄어들지 않는다.
+    // 앱 시작 후 누적 이동거리 (m, 화면용으로 보간). 줄어들지 않는다.
     public double TotalDistanceM { get; private set; }
+    // 회전 신호로 확인된 누적 이동거리 (m) = 회전 수 × 둘레
+    public double CountedDistanceM { get; private set; }
+    // 앱 시작 후 인식한 회전 수
+    public long RotationCount { get; private set; }
     // 마지막으로 센서 메시지를 받은 시각 (Time.unscaledTime). 받은 적 없으면 -1.
     public float LastMessageTime { get; private set; } = -1f;
 
-    // 속도는 이 시간 동안의 누적거리 변화로 계산한다.
-    // 메시지마다 계산하면 한 프레임에 여러 줄이 몰려 들어올 때 간격이 0에 가까워 값이 튄다.
-    private const float SpeedWindowSeconds = 0.5f;
-    // 잡음 판정 시 최소 시간 간격. 몰려 들어온 메시지를 잡음으로 버리지 않게 한다.
-    private const float MinCheckSeconds = 0.25f;
+    private float lastRotationTime = -1f;
+    // 직전 두 회전 간격으로 계산한 속도 (m/s). 정지 후 첫 회전이면 0.
+    private float intervalSpeedMps;
+    // 화면 거리를 움직이는 속도 (m/s). 속도를 아직 모르는 첫 회전에도 캐릭터가 걷게 하려고 SpeedMps 와 따로 둔다.
+    private float displayMps;
 
-    private uint lastPulse;
-    private bool hasPulseBase;
-    private float lastPulseTime;
-    private float rpmSpeedMps;
-    private float lastRpmTime = -1f;
-    private float windowStartTime = -1f;
-    private double windowStartDistance;
-    private float windowSpeedMps;
+    // 1회전 넘게 뒤처졌을 때 넘친 거리를 따라잡는 시간(초)
+    private const float LagRecoverSeconds = 0.5f;
 
     public WheelSensor(int wheelId, int controllerId, KeyCode simulateKey)
     {
@@ -41,88 +44,104 @@ public class WheelSensor
         SimulateKey = simulateKey;
     }
 
-    // 누적 펄스 수신. 증가분을 거리로 더한다. 처리 결과를 문자열로 돌려준다 (null = 정상, 로그 생략).
-    public string ApplyPulse(uint pulse, float now, GameDynamicData cfg)
+    // 1회전 신호 수신. 처리 결과를 문자열로 돌려준다 ("무시됨"으로 시작하면 버린 신호).
+    public string ApplyRotation(float now, GameDynamicData cfg)
     {
         LastMessageTime = now;
+        float circ = Circumference(cfg);
 
-        if (!hasPulseBase || pulse < lastPulse)
+        string speedNote;
+        if (lastRotationTime >= 0f)
         {
-            string note = hasPulseBase ? $"펄스 값 감소({lastPulse}→{pulse}) - 컨트롤러 재시작으로 보고 기준값만 다시 잡음" : $"펄스 기준값 설정: {pulse}";
-            hasPulseBase = true;
-            lastPulse = pulse;
-            lastPulseTime = now;
-            return note;
+            float interval = now - lastRotationTime;
+            float kmh = interval > 0f ? circ / interval * 3.6f : float.PositiveInfinity;
+            // 센서 튐: 사람이 낼 수 없는 속도로 환산되는 간격. 기준 시각을 바꾸지 않아야 다음 정상 신호가 맞게 계산된다.
+            if (kmh > cfg.maxValidSpeedKmh)
+                return $"무시됨: 회전 간격 {interval:0.00}s = {kmh:0.0}km/h (> {cfg.maxValidSpeedKmh}km/h)";
+
+            if (interval <= StopSeconds(cfg))
+            {
+                intervalSpeedMps = circ / interval;
+                speedNote = $"간격 {interval:0.00}s, {kmh:0.0}km/h";
+            }
+            else
+            {
+                intervalSpeedMps = 0f;
+                speedNote = $"정지 후 첫 회전 (간격 {interval:0.0}s)";
+            }
+        }
+        else
+        {
+            intervalSpeedMps = 0f;
+            speedNote = "첫 회전";
         }
 
-        uint delta = pulse - lastPulse;
-        float dt = Mathf.Max(MinCheckSeconds, now - lastPulseTime);
-        lastPulse = pulse;
-        lastPulseTime = now;
-
-        float meters = delta * MetersPerPulse(cfg);
-        float speedKmh = meters / dt * 3.6f;
-        if (speedKmh > cfg.maxValidSpeedKmh)
-            return $"무시됨: 증가 {delta}펄스/{dt:0.00}s = {speedKmh:0.0}km/h (> {cfg.maxValidSpeedKmh}km/h)";
-
-        TotalDistanceM += meters;
-        return null;
+        lastRotationTime = now;
+        RotationCount++;
+        CountedDistanceM += circ;
+        return $"회전 #{RotationCount} 인식 - {speedNote}";
     }
 
-    // RPM 수신. 거리는 Tick 에서 시간 적분한다.
-    public void ApplyRpm(float rpm, float now, GameDynamicData cfg)
+    // 장치 없이 시험: 키를 누를 때마다 회전 신호(R1) 1개를 만든다. 실제 신호와 같은 ApplyRotation 경로를 탄다.
+    // 누른 간격으로 속도가 계산된다. 회전이 생기면 처리 결과, 아니면 null.
+    public string TickSimulation(float now, GameDynamicData cfg)
     {
-        LastMessageTime = now;
-        lastRpmTime = now;
-        rpmSpeedMps = Mathf.Max(0f, rpm) / 60f * Mathf.Max(0f, cfg.rollerCircumferenceM);
+        if (SimulateKey == KeyCode.None || !Input.GetKeyDown(SimulateKey)) return null;
+        return ApplyRotation(now, cfg);
     }
 
-    // 매 프레임 호출. RPM 적분, 시뮬레이션 키, 속도 계산과 평활을 처리한다.
+    // 매 프레임 호출. 속도 계산·평활과 표시 거리 보간을 처리한다.
     public void Tick(float now, float dt, GameDynamicData cfg)
     {
-        // RPM 방식: 마지막 값이 sensorStopSeconds 안에 들어온 동안 속도 × 시간으로 거리 적분
-        if (lastRpmTime >= 0f && now - lastRpmTime <= Mathf.Max(0.1f, cfg.sensorStopSeconds))
-            TotalDistanceM += rpmSpeedMps * dt;
+        float circ = Circumference(cfg);
 
-        // 장치 없이 시험: 키를 누르는 동안 정해진 속도로 달린다
-        if (SimulateKey != KeyCode.None && Input.GetKey(SimulateKey))
-            TotalDistanceM += cfg.simulateSpeedKmh / 3.6f * dt;
-
-        // 누적거리 변화로 구간 속도 계산 (펄스·RPM·시뮬레이션 공통). 거리 변화가 없으면 자연히 0.
-        if (windowStartTime < 0f)
+        float targetMps = 0f;
+        if (lastRotationTime >= 0f && intervalSpeedMps > 0f)
         {
-            windowStartTime = now;
-            windowStartDistance = TotalDistanceM;
-        }
-        else if (now - windowStartTime >= SpeedWindowSeconds)
-        {
-            windowSpeedMps = (float)((TotalDistanceM - windowStartDistance) / (now - windowStartTime));
-            windowStartTime = now;
-            windowStartDistance = TotalDistanceM;
+            float elapsed = now - lastRotationTime;
+            // 다음 회전이 예상보다 늦으면 그만큼 느려진 것으로 본다
+            if (elapsed <= StopSeconds(cfg))
+                targetMps = Mathf.Min(intervalSpeedMps, circ / Mathf.Max(0.01f, elapsed));
         }
 
         float smoothing = Mathf.Max(0.01f, cfg.speedSmoothingSeconds);
-        SpeedMps = Mathf.Lerp(SpeedMps, windowSpeedMps, 1f - Mathf.Exp(-dt / smoothing));
-        if (windowSpeedMps <= 0f && SpeedMps < 0.05f) SpeedMps = 0f;
+        float blend = 1f - Mathf.Exp(-dt / smoothing);
+        SpeedMps = Mathf.Lerp(SpeedMps, targetMps, blend);
+        if (targetMps <= 0f && SpeedMps < 0.05f) SpeedMps = 0f;
+
+        // 화면 거리: 속도를 알면 그 속도로 간다. 정지 후 첫 회전처럼 속도를 아직 모르면
+        // 확인된 회전 거리를 firstRotationSeconds 에 걸쳐 일정한 빠르기로 걸어간다 (속도·발전량은 그대로 0).
+        // 남은 거리에 비례해 따라가면 신호 직후 순간적으로 튀어 나갔다가 멈춰 보인다.
+        float gap = (float)(CountedDistanceM - TotalDistanceM);
+        float displayTarget = targetMps > 0f ? targetMps : gap > 0.01f ? circ / FirstRotationSeconds(cfg) : 0f;
+        displayMps = Mathf.Lerp(displayMps, displayTarget, blend);
+        if (displayTarget <= 0f && displayMps < 0.05f) displayMps = 0f;
+
+        // 빨라져서 1회전 넘게 뒤처지면 넘친 거리만큼만 짧게 나눠 따라잡는다 (한 번에 옮기면 캐릭터가 튄다)
+        float lagFix = gap > circ ? (gap - circ) / LagRecoverSeconds : 0f;
+        double next = TotalDistanceM + (displayMps + lagFix) * dt;
+        TotalDistanceM = Math.Max(TotalDistanceM, Math.Min(next, CountedDistanceM));
     }
 
-    private static float MetersPerPulse(GameDynamicData cfg)
-    {
-        return Mathf.Max(0f, cfg.rollerCircumferenceM) / Mathf.Max(1, cfg.pulsesPerRevolution);
-    }
+    private static float Circumference(GameDynamicData cfg) => Mathf.Max(0.01f, cfg.wheelCircumferenceM);
+    private static float StopSeconds(GameDynamicData cfg) => Mathf.Max(0.5f, cfg.rotationStopSeconds);
+    private static float FirstRotationSeconds(GameDynamicData cfg) => Mathf.Max(0.3f, cfg.firstRotationSeconds);
 }
 
-// 쳇바퀴 RPM 센서 컨트롤러와의 RS232 통신. 쳇바퀴 2대를 컨트롤러 id 로 구분한다.
-// SerialPortManager 대신 이 컴포넌트를 씬에 둔다. 규약은 Docs/ControllerProtocol.md 참고.
+// 쳇바퀴 회전 센서 컨트롤러와의 RS232 통신. 규약은 Docs/ControllerProtocol.md 참고.
+// SerialPortManager 대신 이 컴포넌트를 씬에 둔다.
 //
-// 컨트롤러 → PC : P,누적펄스 / RPM,값 / ERR,내용 / PONG
-// PC → 컨트롤러 : PING (연결 확인용)
+// 컨트롤러 → PC : R1 (쳇바퀴 1회전), ERR,내용 / PONG
+// PC → 컨트롤러 : PING (연결 확인용, 열린 모든 포트로)
+//
+// 컨트롤러 id 로 쳇바퀴를 구분한다: 쳇바퀴마다 컨트롤러가 1대씩 붙고 체험자가 따로 달리므로,
+// 같은 R1 신호라도 어느 포트로 들어왔는지에 따라 다른 쳇바퀴의 거리·속도로 더해야 한다.
+// 포트(port.json controllerId) → 쳇바퀴 연결은 Setting.json 의 wheels[].controllerId.
 //
 // 포트가 닫혀 있어도 Setting.json 의 simulateKey 로 달리기를 흉내 낼 수 있다.
 public class WheelSensorLink : SerialPortManager
 {
-    public const string MsgPulse = "P";
-    public const string MsgRpm = "RPM";
+    public const string MsgRotation = "R1";
     public const string MsgError = "ERR";
     public const string MsgPong = "PONG";
     public const string CmdPing = "PING";
@@ -179,18 +198,35 @@ public class WheelSensorLink : SerialPortManager
         return null;
     }
 
+    protected override void Start()
+    {
+        base.Start();
+        foreach (var s in Sensors)
+            ShortcutHelp.Register(this, s.SimulateKey, $"쳇바퀴 {s.WheelId} 회전 신호(R1) 1개 보내기 (누른 간격으로 속도 계산)", "모든 화면, 발전 중에만 기록됨");
+    }
+
+    protected override void OnDestroy()
+    {
+        ShortcutHelp.Unregister(this);
+        base.OnDestroy();
+    }
+
     private void Update()
     {
         float now = Time.unscaledTime;
         float dt = Time.unscaledDeltaTime;
         EnsureSensors();
-        foreach (var s in sensors) s.Tick(now, dt, Config);
+        foreach (var s in sensors)
+        {
+            string simNote = s.TickSimulation(now, Config);
+            if (simNote != null) ReportInterpretation(s.ControllerId, $"[시뮬레이션] 쳇바퀴 {s.WheelId} {simNote}", simNote.StartsWith("무시됨"));
+            s.Tick(now, dt, Config);
+        }
 
         if (pingIntervalSeconds > 0f && now >= nextPingTime)
         {
             nextPingTime = now + pingIntervalSeconds;
-            foreach (var s in sensors)
-                if (IsControllerOpen(s.ControllerId)) SendData(s.ControllerId, CmdPing);
+            SendDataToAll(CmdPing);
         }
     }
 
@@ -198,41 +234,31 @@ public class WheelSensorLink : SerialPortManager
     {
         if (string.IsNullOrEmpty(data)) return;
 
-        var sensor = GetSensorByController(controllerId);
-        if (sensor == null)
+        string text = data.Trim().ToUpperInvariant();
+        string head = text.Split(',')[0].Trim();
+
+        if (head == MsgPong) return;
+        if (head == MsgError)
         {
-            ReportInterpretation(controllerId, $"무시됨: 이 컨트롤러에 연결된 쳇바퀴 없음 - {data}", true);
+            ReportInterpretation(controllerId, $"장치 오류: {data}", true);
             return;
         }
 
-        string[] parts = data.Trim().Split(',');
-        string head = parts[0].Trim().ToUpperInvariant();
-        float now = Time.unscaledTime;
-
-        switch (head)
+        if (head == MsgRotation)
         {
-            case MsgPulse:
-                if (parts.Length > 1 && uint.TryParse(parts[1].Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture, out uint pulse))
-                {
-                    string note = sensor.ApplyPulse(pulse, now, Config);
-                    if (note != null) ReportInterpretation(controllerId, $"쳇바퀴 {sensor.WheelId} {note}", note.StartsWith("무시됨"));
-                }
-                else ReportInterpretation(controllerId, $"무시됨(형식 오류): {data}", true);
-                break;
-            case MsgRpm:
-                if (parts.Length > 1 && float.TryParse(parts[1].Trim(), NumberStyles.Float, CultureInfo.InvariantCulture, out float rpm))
-                    sensor.ApplyRpm(rpm, now, Config);
-                else ReportInterpretation(controllerId, $"무시됨(형식 오류): {data}", true);
-                break;
-            case MsgPong:
-                break;
-            case MsgError:
-                ReportInterpretation(controllerId, $"장치 오류: {data}", true);
-                break;
-            default:
-                ReportInterpretation(controllerId, $"무시됨(알 수 없는 메시지): {data}", true);
-                break;
+            var sensor = GetSensorByController(controllerId);
+            if (sensor == null)
+            {
+                ReportInterpretation(controllerId, $"무시됨: 이 컨트롤러(id {controllerId})에 연결된 쳇바퀴 없음 (Setting.json wheels[].controllerId 확인) - {data}", true);
+                return;
+            }
+
+            string note = sensor.ApplyRotation(Time.unscaledTime, Config);
+            ReportInterpretation(controllerId, $"쳇바퀴 {sensor.WheelId} {note}", note.StartsWith("무시됨"));
+            return;
         }
+
+        ReportInterpretation(controllerId, $"무시됨(알 수 없는 메시지): {data}", true);
     }
 
     private static KeyCode ParseKey(string name)

@@ -1,24 +1,28 @@
 {
-    "runSeconds": 180.0,
+    "runSeconds": 50.0,
     "countdownSeconds": 3,
-    "pulsesPerRevolution": 1,
-    "rollerCircumferenceM": 0.5,
-    "sensorStopSeconds": 1.0,
+    "guideSeconds": 12.0,
+    "characterSelectSeconds": 12.0,
+    "joinWaitSeconds": 15.0,
+    "wheelCircumferenceM": 6.283,
+    "rotationStopSeconds": 5.0,
     "speedSmoothingSeconds": 0.3,
     "maxValidSpeedKmh": 40.0,
-    "simulateSpeedKmh": 12.0,
+    "firstRotationSeconds": 2.0,
     "wattPerKmh": 15.0,
     "maxWatt": 300.0,
-    "saleScaleMinutes": 60.0,
+    "saleScaleMinutes": 6000.0,
     "smpWonPerKWh": 150.0,
     "voltages": [
         { "id": "low", "label": "낮은 전압", "lossRate": 0.30, "facilityCostWon": 0.0 },
-        { "id": "high", "label": "높은 전압", "lossRate": 0.05, "facilityCostWon": 3.0 }
+        { "id": "high", "label": "높은 전압", "lossRate": 0.05, "facilityCostWon": 300.0 }
     ],
-    "transmitSeconds": 6.0,
+    "transmitSeconds": 20.0,
     "idleTimeoutSeconds": 60.0,
-    "resultAutoCloseSeconds": 20.0,
-    "rankingShowCount": 10,
+    "resultAutoCloseSeconds": 15.0,
+    "rankingShowCount": 5,
+    "recordLineCount": 3,
+    "rankingPopupSeconds": 6.0,
     "wheels": [
         { "wheelId": 1, "controllerId": 1, "displayIndex": 0, "simulateKey": "UpArrow" },
         { "wheelId": 2, "controllerId": 2, "displayIndex": 1, "simulateKey": "W" }
