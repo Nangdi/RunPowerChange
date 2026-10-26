@@ -11,8 +11,14 @@ public abstract class WheelPanel : PanelBase
     [SerializeField] private GaugeView autoGauge;
 
     protected WheelSession Session { get; private set; }
+    // 이 화면(32형)에 3D 장면을 그리는 카메라. 캐릭터 위 표시 등 3D 위치를 화면 좌표로 바꿀 때 쓴다.
+    protected Camera RaceCamera { get; private set; }
 
-    public void Bind(WheelSession session) => Session = session;
+    public void Bind(WheelSession session, Camera raceCamera)
+    {
+        Session = session;
+        RaceCamera = raceCamera;
+    }
 
     public override void Show()
     {
@@ -42,20 +48,12 @@ public abstract class WheelPanel : PanelBase
 // 표시 형식 모음 (패널과 관전 화면이 같이 쓴다)
 public static class PowerFormat
 {
-    // 환산 발전량은 수천 Wh 단위라 kWh 로 보여 준다
-    public static string Kwh(float wh) => $"{wh / 1000f:#,0.0}";
-    public static string Energy(float wh) => $"{wh:0.00}";
+    // 누적 환산 발전량 (Wh). 천 단위가 넘으면 소수점 없이 자릿수 구분.
+    public static string Wh(float wh) => wh >= 1000f ? $"{wh:#,0}" : $"{wh:0.0}";
     public static string Won(float won) => $"{won:#,0}";
-    public static string Watt(float w) => $"{w:0}";
-    public static string Speed(float kmh) => $"{kmh:0.0}";
-    public static string Distance(float m) => $"{m:#,0}";
+    // 속도계·남은 시간은 두 자리 (시안: 00)
+    public static string TwoDigits(float value) => $"{Mathf.Clamp(Mathf.FloorToInt(value), 0, 99):00}";
     public static string Seconds(float seconds) => $"{Mathf.Max(0, Mathf.CeilToInt(seconds))}";
-
-    public static string Time(float seconds)
-    {
-        int s = Mathf.Max(0, Mathf.CeilToInt(seconds));
-        return $"{s / 60:00}:{s % 60:00}";
-    }
-
-    public static string Rank(int rank) => $"{rank}<size=50%>위</size>";
+    // 랭킹 표의 기록 시각 (시안: 26.10.22 1:22:43)
+    public static string RecordTime(System.DateTime time) => time.ToString("yy.MM.dd H:mm:ss");
 }

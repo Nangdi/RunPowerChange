@@ -52,11 +52,11 @@ public class GameDynamicData
     // 시작 카운트다운(초)
     public int countdownSeconds = 3;
     // 체험 안내 화면 자동 넘김(초)
-    public float guideSeconds = 12f;
-    // 캐릭터 선택 화면 자동 넘김(초). 고르지 않으면 기본 캐릭터.
-    public float characterSelectSeconds = 12f;
-    // 한 명이 시작한 뒤 다른 쳇바퀴가 같은 회차로 합류할 수 있는 시간(초)
-    public float joinWaitSeconds = 15f;
+    public float guideSeconds = 10f;
+    // 한 명이 시작한 뒤 다른 쳇바퀴가 같은 회차로 합류할 수 있는 시간(초). 참가 대기 화면에 남은 초가 나온다.
+    public float joinWaitSeconds = 9f;
+    // 참가가 마감된 뒤 "준비하세요!" 화면(초). 끝나면 체험 안내로 넘어간다.
+    public float readySeconds = 3f;
 
     // 쳇바퀴 1회전 이동거리(m). 컨트롤러가 1회전마다 신호를 보내면 이만큼 거리를 더한다. (직경 2m → 6.283)
     public float wheelCircumferenceM = 6.283f;
@@ -75,27 +75,36 @@ public class GameDynamicData
 
     // 판매 환산: "이 속도로 saleScaleMinutes 분 달렸을 때" 의 발전량으로 계산 (시안: 100시간)
     public float saleScaleMinutes = 6000f;
-    // 기준 판매단가 (원/kWh, SMP 범위 내 임시값)
-    public float smpWonPerKWh = 150f;
+    // 판매단가 기준: 이 속도(km/h, 15세 평균 최고속도)로 체험 시간 내내 달리고 가장 유리한 전압을 고르면
+    // 판매 금액이 saleReferenceWon 이 되도록 판매단가(원/kWh)를 자동으로 정한다. (50m 평균 약 8.7초 ≈ 20km/h)
+    public float saleReferenceKmh = 20f;
+    public float saleReferenceWon = 5000f;
     public List<VoltageOption> voltages = new List<VoltageOption>
     {
         new VoltageOption { id = "low", label = "낮은 전압", lossRate = 0.30f, facilityCostWon = 0f },
         new VoltageOption { id = "high", label = "높은 전압", lossRate = 0.05f, facilityCostWon = 300f },
     };
 
-    // 송전 시뮬레이션 연출 시간(초)
-    public float transmitSeconds = 20f;
+    // 최종 전력 판매 금액 화면(초). 끝나면 랭킹 화면으로 넘어간다.
+    public float saleSeconds = 10f;
+    // 판매 금액 화면에서 카드가 하나씩 나타나는 간격(초)
+    public float saleStepSeconds = 0.6f;
 
-    // 선택 화면 등에서 무입력 시 대기화면 복귀(초). 0 이하이면 사용 안 함.
-    public float idleTimeoutSeconds = 60f;
-    // 결과·정산 화면 자동 넘김(초)
-    public float resultAutoCloseSeconds = 15f;
-    // 랭킹 표시 인원
-    public int rankingShowCount = 5;
-    // 85형 레코드 라인으로 보여 줄 오늘 상위 기록 수 (1위는 1인 체험 고스트로도 쓴다)
-    public int recordLineCount = 3;
-    // 85형 새 랭킹 팝업 표시 시간(초)
-    public float rankingPopupSeconds = 6f;
+    // 송전 전압 선택 화면에서 무입력 시 대기화면 복귀(초). 0 이하이면 사용 안 함. (그 밖의 화면은 자동으로 넘어간다)
+    public float idleTimeoutSeconds = 30f;
+    // 랭킹 화면 자동 넘김(초)
+    public float resultAutoCloseSeconds = 10f;
+
+    // 속도계 바늘이 끝까지 가는 속도(km/h)
+    public float speedometerMaxKmh = 20f;
+    // 결승선이 체험 끝나기 몇 초 전부터 다가오는지
+    public float finishApproachSeconds = 10f;
+    // 3D 배경(기둥·레일)이 달린 1m 마다 흘러가는 거리(유닛). 클수록 같은 속도에서 배경이 빨리 지나간다.
+    public float raceScrollPerMeter = 1.5f;
+    // 두 체험자의 거리 차 1m 를 화면에서 앞뒤로 몇 유닛 벌릴지. 클수록 조금만 앞서도 크게 벌어진다.
+    public float raceGapPerMeter = 0.1f;
+    // 85형 아래 칸(랭킹 → 왜 그럴까요? → 우리와 어떤 관련이?)이 바뀌는 간격(초)
+    public float spectatorInfoSeconds = 10f;
 
     // 쳇바퀴별 연결 (PC 1대에 쳇바퀴 2대)
     public List<WheelConfig> wheels = new List<WheelConfig>

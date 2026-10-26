@@ -8,43 +8,12 @@ using UnityEngine.SceneManagement;
 using UnityEngine.UI;
 using static PowerUIKit;
 
-// 임시 스프라이트와 디자이너용 가이드 이미지를 PNG로 만든다.
-//  - Static/Static_xxx.png : 패널별 정적 레이어 (PowerStaticLayouts 내용을 렌더링, 배경 투명 - 뒤에 3D 장면이 보인다)
-//                            Static_Spectator.png 는 85형 세로 화면(1080x1920)
-//  - Parts/*.png           : 카드 배경, 버튼, 게이지 등 동적 요소용 부품
-//  - _Guide/Guide_xxx.png  : 정적 레이어 위에 동적 요소 자리를 표시한 작업 가이드
-// 디자인 PNG로 같은 경로의 파일을 덮어쓰면 씬/프리팹 수정 없이 바로 반영된다.
+// 디자이너용 가이드 이미지와 패널 미리보기 PNG 를 만든다. (화면 이미지 자체는 Tools/psd_export.py 가 PSD 에서 뽑는다)
+//  - _Guide/Guide_xxx.png : 정적 레이어 위에 동적 요소 자리를 표시한 작업 가이드
+//  - RenderPreview        : 패널 프리팹을 배경 이미지 위에 그려 PNG 로 저장 (플레이 없이 배치 확인용)
 public static class PowerSpriteExporter
 {
-    // 둥근 박스 부품 (9-slice). radius가 곧 slice 테두리 크기.
-    private static readonly (string name, Color color, int radius)[] ShapeParts =
-    {
-        ("Card_Bg", Color.white, 24),      // 카드·알약 배경. 색은 프리팹이 칠한다
-        ("Gauge_Bg", Color.white, 40),     // 게이지 바탕과 채움 (양 끝 둥근 바). 색은 프리팹이 칠한다
-        ("RankRow_Bg", Color.white, 12),   // 색은 프리팹이 칠한다
-    };
-
-    // 흰 원 (남은 시간 원형 게이지, 카운트다운 원). 색은 프리팹이 칠한다
-    private const string CircleName = "Circle";
-    private const int CircleSize = 256;
-    // 선택 테두리 (속이 빈 둥근 사각, 9-slice). 색은 프리팹이 칠한다
-    private const string FrameName = "Frame_Bg";
-    private const int FrameRadius = 32;
-    private const int FrameThickness = 8;
-
-    private const string DotName = "Dot"; // 흰 원. 색은 프리팹이 칠한다
-    private const int DotSize = 64;
-
     private static readonly Color GuideColor = new Color(1f, 0.1f, 0.8f, 1f);
-
-    [MenuItem("Tools/달려라 전력 챌린지/3. 임시 스프라이트 다시 내보내기 (덮어쓰기)", priority = 3)]
-    private static void ExportAllMenu()
-    {
-        bool ok = EditorUtility.DisplayDialog("달려라 전력 챌린지",
-            "4.Sprite/Static, 4.Sprite/Parts의 PNG를 모두 임시 디자인으로 덮어씁니다.\n디자이너가 넣은 이미지도 사라집니다. 계속할까요?",
-            "덮어쓰기", "취소");
-        if (ok) Export(overwrite: true);
-    }
 
     [MenuItem("Tools/달려라 전력 챌린지/2. 가이드 PNG 다시 만들기", priority = 2)]
     public static void ExportGuides()
@@ -60,84 +29,73 @@ public static class PowerSpriteExporter
                 continue;
             }
 
-            bool spectator = panel == SpectatorName;
-            int w = spectator ? SpectatorWidth : ScreenWidth, h = spectator ? SpectatorHeight : ScreenHeight;
-            Texture2D tex = Render(w, h, false, root => DrawGuide(root, prefab, w, h));
-            WritePng(GuidePath(panel), tex, 0);
+            Vector2 size = panel == SpectatorName ? SpectatorResolution : ReferenceResolution;
+            Texture2D tex = Render((int)size.x, (int)size.y, root => DrawGuide(root, prefab, size));
+            WritePng(GuidePath(panel), tex);
         }
         Debug.Log($"가이드 PNG 생성 완료: {GuideDir}");
     }
 
-    // overwrite가 false면 없는 파일만 만든다 (디자이너가 넣은 파일 보호).
-    public static void Export(bool overwrite)
+    // 패널 프리팹을 배경(없으면 회색) 위에 그려 outPath 에 저장한다. prepare 로 표시 상태(켜고 끌 오브젝트)를 바꿀 수 있다.
+    public static void RenderPreview(string panelPrefabPath, string outPath, string backgroundPath = null, Action<GameObject> prepare = null)
     {
-        EnsureFolder(StaticDir);
-        EnsureFolder(PartsDir);
-        int count = 0;
-
-        // 둥근 부품을 먼저 만든다 (정적 레이어 렌더링이 Card_Bg 를 쓴다)
-        foreach (var shape in ShapeParts)
+        var prefab = AssetDatabase.LoadAssetAtPath<GameObject>(panelPrefabPath);
+        if (prefab == null) throw new ArgumentException($"프리팹이 없습니다: {panelPrefabPath}");
+        bool spectator = panelPrefabPath.Contains(SpectatorName);
+        Vector2 size = spectator ? SpectatorResolution : ReferenceResolution;
+        Texture2D bg = null;
+        if (!string.IsNullOrEmpty(backgroundPath) && File.Exists(backgroundPath))
         {
-            string path = PartSpritePath(shape.name);
-            if (!overwrite && File.Exists(path)) continue;
-            int size = shape.radius * 2 + 2;
-            WritePng(path, RoundRect(size, size, shape.radius, shape.color), shape.radius);
-            count++;
+            bg = new Texture2D(2, 2);
+            bg.LoadImage(File.ReadAllBytes(backgroundPath));
         }
 
-        foreach (var pair in PowerStaticLayouts.Panels)
+        Texture2D tex = Render((int)size.x, (int)size.y, root =>
         {
-            string path = StaticSpritePath(pair.Key);
-            if (!overwrite && File.Exists(path)) continue;
-            WritePng(path, Render(ScreenWidth, ScreenHeight, true, pair.Value), 0);
-            count++;
-        }
+            RectTransform back = StretchFull(CreateRect("Background", root));
+            if (bg != null) back.gameObject.AddComponent<RawImage>().texture = bg;
+            else AddImage(back, new Color(0.25f, 0.27f, 0.32f));
+            var panel = (GameObject)UnityEngine.Object.Instantiate(prefab, root);
+            panel.SetActive(true);
+            prepare?.Invoke(panel);
+        });
+        File.WriteAllBytes(outPath, tex.EncodeToPNG());
+        UnityEngine.Object.DestroyImmediate(tex);
+        if (bg != null) UnityEngine.Object.DestroyImmediate(bg);
+    }
 
-        string spectatorPath = StaticSpritePath(SpectatorName);
-        if (overwrite || !File.Exists(spectatorPath))
+    // 실행 중인 패널(지금 상태 그대로)을 3D 화면 캡처 위에 그려 저장한다 (플레이 모드 시험용).
+    // 복제본은 스크립트를 떼고 그리므로 실행 중인 패널에는 영향이 없다.
+    public static void RenderLive(GameObject livePanel, Texture background, Vector2 size, string outPath)
+    {
+        Texture2D tex = Render((int)size.x, (int)size.y, root =>
         {
-            WritePng(spectatorPath, Render(SpectatorWidth, SpectatorHeight, true, PowerStaticLayouts.Spectator), 0);
-            count++;
-        }
+            RectTransform back = StretchFull(CreateRect("Background", root));
+            if (background != null) back.gameObject.AddComponent<RawImage>().texture = background;
+            else AddImage(back, Color.black);
 
-        foreach (var part in PowerStaticLayouts.TextParts)
-        {
-            string path = PartSpritePath(part.name);
-            if (!overwrite && File.Exists(path)) continue;
-            WritePng(path, Render(part.size.x, part.size.y, true, part.draw), 0);
-            count++;
-        }
-
-        string dotPath = PartSpritePath(DotName);
-        if (overwrite || !File.Exists(dotPath))
-        {
-            WritePng(dotPath, RoundRect(DotSize, DotSize, DotSize / 2, Color.white), 0);
-            count++;
-        }
-
-        string circlePath = PartSpritePath(CircleName);
-        if (overwrite || !File.Exists(circlePath))
-        {
-            WritePng(circlePath, RoundRect(CircleSize, CircleSize, CircleSize / 2, Color.white), 0);
-            count++;
-        }
-
-        string framePath = PartSpritePath(FrameName);
-        if (overwrite || !File.Exists(framePath))
-        {
-            int size = FrameRadius * 2 + 2;
-            WritePng(framePath, RoundRing(size, size, FrameRadius, FrameThickness, Color.white), FrameRadius);
-            count++;
-        }
-
-        if (count > 0)
-            Debug.Log($"임시 스프라이트 {count}개 생성 ({(overwrite ? "덮어쓰기" : "없는 파일만")})");
+            // 꺼진 부모 아래에 복제해 Awake 가 돌지 않게 하고, 프로젝트 스크립트를 뗀 뒤 켠다
+            RectTransform holder = StretchFull(CreateRect("Holder", root));
+            holder.gameObject.SetActive(false);
+            var clone = UnityEngine.Object.Instantiate(livePanel, holder);
+            foreach (var mb in clone.GetComponentsInChildren<MonoBehaviour>(true))
+                if (mb != null && mb.GetType().Assembly.GetName().Name == "Assembly-CSharp") UnityEngine.Object.DestroyImmediate(mb);
+            var rt = (RectTransform)clone.transform;
+            rt.anchorMin = Vector2.zero;
+            rt.anchorMax = Vector2.one;
+            rt.offsetMin = rt.offsetMax = Vector2.zero;
+            clone.SetActive(true);
+            holder.gameObject.SetActive(true);
+        });
+        File.WriteAllBytes(outPath, tex.EncodeToJPG(85));
+        UnityEngine.Object.DestroyImmediate(tex);
     }
 
     #region 가이드
 
-    private static void DrawGuide(RectTransform root, GameObject panelPrefab, int width, int height)
+    private static void DrawGuide(RectTransform root, GameObject panelPrefab, Vector2 size)
     {
+        AddImage(StretchFull(CreateRect("Background", root)), new Color(0.25f, 0.27f, 0.32f));
         var panel = (RectTransform)UnityEngine.Object.Instantiate(panelPrefab, root).transform;
         panel.name = panelPrefab.name;
         LayoutRebuilder.ForceRebuildLayoutImmediate(root);
@@ -145,16 +103,24 @@ public static class PowerSpriteExporter
         foreach (Transform child in panel)
         {
             if (child.name == StaticLayerName) continue;
+            child.gameObject.SetActive(true);
             MarkDynamicArea((RectTransform)child);
         }
 
         var legend = CreateText(root, "Legend", "■ 분홍 박스 = 동적 요소 자리 (정적 PNG에 그리지 말 것)",
-            new Vector2(0, height * 0.5f - 20), new Vector2(width, 40), 24, GuideColor, true);
+            new Vector2(0, size.y * 0.5f - 24), new Vector2(size.x, 44), size.x > 2000 ? 40 : 24, GuideColor, Weight.Bold);
         legend.alignment = TextAlignmentOptions.Center;
     }
 
     private static void MarkDynamicArea(RectTransform target)
     {
+        // 화면 전체를 덮는 묶음(카드 묶음 등)은 안쪽 자식마다 표시한다
+        if (target.anchorMin == Vector2.zero && target.anchorMax == Vector2.one && target.GetComponent<Graphic>() == null)
+        {
+            foreach (Transform child in target) MarkDynamicArea((RectTransform)child);
+            return;
+        }
+
         RectTransform box = StretchFull(CreateRect("GuideBox", target));
         box.gameObject.AddComponent<LayoutElement>().ignoreLayout = true;
         AddImage(box, new Color(GuideColor.r, GuideColor.g, GuideColor.b, 0.18f));
@@ -166,8 +132,9 @@ public static class PowerSpriteExporter
         AddImage(Edge(box, new Vector2(1, 0), Vector2.one, new Vector2(-t, 0), Vector2.zero), GuideColor);
 
         var label = AddText(Stretch(CreateRect("GuideLabel", box), Vector2.zero, Vector2.one, 6),
-            target.name, 20, GuideColor, true, TextAlignmentOptions.TopLeft);
+            target.name, 20, GuideColor, Weight.Bold, TextAlignmentOptions.TopLeft);
         label.enableWordWrapping = false;
+        label.enableAutoSizing = false;
         label.overflowMode = TextOverflowModes.Overflow;
     }
 
@@ -186,7 +153,7 @@ public static class PowerSpriteExporter
     #region 렌더링
 
     // 임시 프리뷰 씬에 UI를 만들어 카메라로 찍는다. 현재 씬은 건드리지 않는다.
-    private static Texture2D Render(int width, int height, bool transparent, Action<RectTransform> build)
+    private static Texture2D Render(int width, int height, Action<RectTransform> build)
     {
         Scene scene = EditorSceneManager.NewPreviewScene();
         RenderTexture rt = RenderTexture.GetTemporary(width, height, 24, RenderTextureFormat.ARGB32, RenderTextureReadWrite.sRGB);
@@ -203,6 +170,7 @@ public static class PowerSpriteExporter
             cam.farClipPlane = 1000f;
             cam.transform.position = new Vector3(0, 0, -100);
             cam.clearFlags = CameraClearFlags.SolidColor;
+            cam.backgroundColor = Color.black;
             cam.targetTexture = rt;
 
             var canvasGo = new GameObject("ExportCanvas", typeof(RectTransform));
@@ -222,10 +190,16 @@ public static class PowerSpriteExporter
                 text.ForceMeshUpdate(true, true);
             Canvas.ForceUpdateCanvases();
 
-            Color32[] onBlack = Capture(cam, rt, Color.black);
-            Color32[] pixels = transparent ? Unblend(onBlack, Capture(cam, rt, Color.white)) : Opaque(onBlack);
-
+            cam.Render();
+            RenderTexture prev = RenderTexture.active;
+            RenderTexture.active = rt;
             var tex = new Texture2D(width, height, TextureFormat.RGBA32, false);
+            tex.ReadPixels(new Rect(0, 0, width, height), 0, 0);
+            tex.Apply();
+            RenderTexture.active = prev;
+
+            Color32[] pixels = tex.GetPixels32();
+            for (int i = 0; i < pixels.Length; i++) pixels[i].a = 255;
             tex.SetPixels32(pixels);
             tex.Apply();
             return tex;
@@ -237,116 +211,11 @@ public static class PowerSpriteExporter
         }
     }
 
-    private static Color32[] Capture(Camera cam, RenderTexture rt, Color background)
+    private static void WritePng(string path, Texture2D tex)
     {
-        cam.backgroundColor = background;
-        cam.Render();
-
-        RenderTexture prev = RenderTexture.active;
-        RenderTexture.active = rt;
-        var tex = new Texture2D(rt.width, rt.height, TextureFormat.RGBA32, false);
-        tex.ReadPixels(new Rect(0, 0, rt.width, rt.height), 0, 0);
-        tex.Apply();
-        RenderTexture.active = prev;
-
-        Color32[] pixels = tex.GetPixels32();
-        UnityEngine.Object.DestroyImmediate(tex);
-        return pixels;
-    }
-
-    private static Color32[] Opaque(Color32[] pixels)
-    {
-        for (int i = 0; i < pixels.Length; i++)
-            pixels[i].a = 255;
-        return pixels;
-    }
-
-    // 검은/흰 배경에 각각 찍은 결과로 원래 색과 투명도를 되살린다.
-    // (배경색 = c*a + bg*(1-a) 이므로 두 결과의 차이가 1-a)
-    private static Color32[] Unblend(Color32[] onBlack, Color32[] onWhite)
-    {
-        var result = new Color32[onBlack.Length];
-        for (int i = 0; i < result.Length; i++)
-        {
-            Color32 b = onBlack[i];
-            Color32 w = onWhite[i];
-            float diff = ((w.r - b.r) + (w.g - b.g) + (w.b - b.b)) / (3f * 255f);
-            float a = Mathf.Clamp01(1f - diff);
-            if (a <= 0.002f)
-            {
-                result[i] = new Color32(0, 0, 0, 0);
-                continue;
-            }
-
-            result[i] = new Color32(
-                (byte)Mathf.Clamp(Mathf.RoundToInt(b.r / a), 0, 255),
-                (byte)Mathf.Clamp(Mathf.RoundToInt(b.g / a), 0, 255),
-                (byte)Mathf.Clamp(Mathf.RoundToInt(b.b / a), 0, 255),
-                (byte)Mathf.RoundToInt(a * 255f));
-        }
-        return result;
-    }
-
-    // 안티에일리어싱된 둥근 사각형
-    private static Texture2D RoundRect(int width, int height, int radius, Color color)
-    {
-        var tex = new Texture2D(width, height, TextureFormat.RGBA32, false);
-        var pixels = new Color[width * height];
-        Vector2 half = new Vector2(width, height) * 0.5f;
-        Vector2 inner = half - Vector2.one * radius;
-
-        for (int y = 0; y < height; y++)
-        for (int x = 0; x < width; x++)
-        {
-            Vector2 p = new Vector2(x + 0.5f, y + 0.5f) - half;
-            Vector2 q = new Vector2(Mathf.Abs(p.x) - inner.x, Mathf.Abs(p.y) - inner.y);
-            float dist = new Vector2(Mathf.Max(q.x, 0f), Mathf.Max(q.y, 0f)).magnitude - radius;
-            float coverage = Mathf.Clamp01(0.5f - dist);
-            pixels[y * width + x] = new Color(color.r, color.g, color.b, color.a * coverage);
-        }
-
-        tex.SetPixels(pixels);
-        tex.Apply();
-        return tex;
-    }
-
-    // 안티에일리어싱된 둥근 사각 테두리 (속이 빔)
-    private static Texture2D RoundRing(int width, int height, int radius, int thickness, Color color)
-    {
-        var tex = new Texture2D(width, height, TextureFormat.RGBA32, false);
-        var pixels = new Color[width * height];
-        Vector2 half = new Vector2(width, height) * 0.5f;
-        Vector2 inner = half - Vector2.one * radius;
-
-        for (int y = 0; y < height; y++)
-        for (int x = 0; x < width; x++)
-        {
-            Vector2 p = new Vector2(x + 0.5f, y + 0.5f) - half;
-            Vector2 q = new Vector2(Mathf.Abs(p.x) - inner.x, Mathf.Abs(p.y) - inner.y);
-            float dist = new Vector2(Mathf.Max(q.x, 0f), Mathf.Max(q.y, 0f)).magnitude + Mathf.Min(Mathf.Max(q.x, q.y), 0f) - radius;
-            float outer = Mathf.Clamp01(0.5f - dist);
-            float innerCut = Mathf.Clamp01(0.5f - (-dist - thickness));
-            pixels[y * width + x] = new Color(color.r, color.g, color.b, color.a * outer * innerCut);
-        }
-
-        tex.SetPixels(pixels);
-        tex.Apply();
-        return tex;
-    }
-
-    private static void WritePng(string path, Texture2D tex, int sliceBorder)
-    {
-        bool isNew = !File.Exists(path);
         File.WriteAllBytes(path, tex.EncodeToPNG());
         UnityEngine.Object.DestroyImmediate(tex);
         AssetDatabase.ImportAsset(path, ImportAssetOptions.ForceUpdate);
-
-        // 9-slice 테두리는 처음 만들 때만 정한다. (이후 디자이너가 Sprite Editor에서 바꾼 값은 유지)
-        if (isNew && sliceBorder > 0 && AssetImporter.GetAtPath(path) is TextureImporter importer)
-        {
-            importer.spriteBorder = new Vector4(sliceBorder, sliceBorder, sliceBorder, sliceBorder);
-            importer.SaveAndReimport();
-        }
     }
 
     #endregion

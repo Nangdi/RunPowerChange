@@ -2,26 +2,27 @@ using UnityEngine;
 
 // 쳇바퀴 1대의 32형 터치모니터 화면. Canvas_Wheel 프리팹 루트에 붙는다.
 // 연결된 WheelSession 의 상태에 맞춰 패널을 켜고 끈다.
+// 대기 중(Idle)인데 옆 쳇바퀴가 먼저 시작해 합류할 수 있으면 대기화면 대신 참가 대기(참여하기) 화면을 보여 준다.
 // 캔버스 출력 디스플레이는 Setting.json wheels[].displayIndex 를 따른다.
 public class WheelScreen : MonoBehaviour
 {
     [Tooltip("이 화면이 보여줄 쳇바퀴 세션 (씬 인스턴스에서 연결)")]
     [SerializeField] private WheelSession session;
     [SerializeField] private Canvas canvas;
+    [Tooltip("이 화면에 3D 장면을 그리는 카메라 (씬 인스턴스에서 연결)")]
+    [SerializeField] private Camera raceCamera;
 
     [Header("패널")]
     [SerializeField] private IdlePanel idlePanel;
-    [SerializeField] private WaitNextPanel waitNextPanel;
+    [SerializeField] private JoinPanel joinPanel;
     [SerializeField] private GuidePanel guidePanel;
-    [SerializeField] private CharacterSelectPanel characterSelectPanel;
     [SerializeField] private CountdownPanel countdownPanel;
     [SerializeField] private RunPanel runPanel;
-    [SerializeField] private RunResultPanel runResultPanel;
     [SerializeField] private VoltagePanel voltagePanel;
-    [SerializeField] private TransmitPanel transmitPanel;
-    [SerializeField] private ResultPanel resultPanel;
+    [SerializeField] private SalePanel salePanel;
+    [SerializeField] private RankingPanel rankingPanel;
 
-    // WheelSession.State 순서. Ready(선택 후 대기)는 캐릭터 선택 화면을 그대로 쓴다.
+    // WheelSession.State 순서
     private WheelPanel[] panels;
     private WheelPanel current;
 
@@ -29,13 +30,12 @@ public class WheelScreen : MonoBehaviour
     {
         panels = new WheelPanel[]
         {
-            idlePanel, waitNextPanel, guidePanel, characterSelectPanel, characterSelectPanel, countdownPanel,
-            runPanel, runResultPanel, voltagePanel, transmitPanel, resultPanel,
+            idlePanel, joinPanel, guidePanel, countdownPanel, runPanel, voltagePanel, salePanel, rankingPanel,
         };
         foreach (var panel in panels)
         {
             if (panel == null) continue;
-            panel.Bind(session);
+            panel.Bind(session, raceCamera);
             panel.Hide();
         }
     }
@@ -49,13 +49,12 @@ public class WheelScreen : MonoBehaviour
         }
 
         ApplyDisplay();
-        session.OnStateChanged += HandleStateChanged;
-        HandleStateChanged(session, session.Current);
+        Refresh();
     }
 
-    private void OnDestroy()
+    private void Update()
     {
-        if (session != null) session.OnStateChanged -= HandleStateChanged;
+        if (session != null) Refresh();
     }
 
     private void ApplyDisplay()
@@ -70,17 +69,28 @@ public class WheelScreen : MonoBehaviour
         Debug.LogWarning($"{name}: Setting.json 에 wheelId {session.WheelId} 가 없어 Display {canvas.targetDisplay + 1} 그대로 사용");
     }
 
-    private void HandleStateChanged(WheelSession s, WheelSession.State state)
+    private WheelPanel PanelFor(WheelSession.State state)
     {
+        if (state == WheelSession.State.Idle)
+        {
+            var round = session.Round;
+            if (round != null && round.Current == GameRound.Phase.Open && round.CanJoin) return joinPanel;
+        }
         int index = (int)state;
-        WheelPanel next = index >= 0 && index < panels.Length ? panels[index] : null;
+        return index >= 0 && index < panels.Length ? panels[index] : null;
+    }
+
+    private void Refresh()
+    {
+        WheelPanel next = PanelFor(session.Current);
+        if (next == current) return;
         if (next == null)
         {
-            Debug.LogWarning($"{name}: {state} 패널이 연결되지 않았습니다.", this);
+            Debug.LogWarning($"{name}: {session.Current} 패널이 연결되지 않았습니다.", this);
             return;
         }
 
-        if (current != null && current != next) current.Hide();
+        if (current != null) current.Hide();
         current = next;
         current.Show();
     }

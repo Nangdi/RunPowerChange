@@ -20,14 +20,8 @@ public static class PowerUIValidator
                 problems += Report($"정적 레이어 이미지가 없습니다: {StaticSpritePath(panel)}", null);
         }
 
-        foreach (string part in new[] { "RankRow", "Gauge" })
-        {
-            var prefab = AssetDatabase.LoadAssetAtPath<GameObject>(PartPrefabPath(part));
-            if (prefab == null)
-                problems += Report($"부품 프리팹이 없습니다: {PartPrefabPath(part)}", null);
-            else
-                problems += CheckReferences(prefab);
-        }
+        if (!System.IO.File.Exists(LayoutPath))
+            problems += Report($"PSD 좌표 파일이 없습니다: {LayoutPath} (Tools/psd_export.py)", null);
 
         var sessions = Object.FindObjectsOfType<WheelSession>(true);
         var screens = Object.FindObjectsOfType<WheelScreen>(true);
@@ -45,8 +39,10 @@ public static class PowerUIValidator
             problems += Report("씬에 GameRound 가 1개 있어야 합니다. '5. 3D 경주 장면 만들기'를 실행하세요.", null);
         foreach (var runner in Object.FindObjectsOfType<RaceRunner>(true))
             problems += CheckReferences(runner.gameObject);
-        foreach (var cam in Object.FindObjectsOfType<RaceCamera>(true))
-            if (cam.name != "Camera_Spectator_Bg") problems += CheckReferences(cam.gameObject);
+        foreach (var stage in Object.FindObjectsOfType<RaceStage>(true))
+            problems += CheckReferences(stage.gameObject);
+        if (Object.FindObjectsOfType<RaceCamera>(true).Length != 3)
+            problems += Report("경주 카메라는 32형 2대 + 85형 1대, 3개여야 합니다. '5. 3D 경주 장면 만들기'를 실행하세요.", null);
 
         foreach (var screen in screens)
         {

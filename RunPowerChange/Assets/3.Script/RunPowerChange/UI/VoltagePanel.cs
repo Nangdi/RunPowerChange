@@ -2,13 +2,15 @@ using TMPro;
 using UnityEngine;
 using UnityEngine.UI;
 
-// 07. 송전전압 선택 (버튼 순서 = Setting.json voltages 순서: 0 낮은 전압, 1 높은 전압)
+// 06. 송전 전압 선택 - 누적 환산 발전량과 오늘의 발전왕 순위를 보여 주고 고/저전압 중 하나를 고른다.
+// 버튼 순서 = Setting.json voltages 순서 (0 낮은 전압, 1 높은 전압).
+// 하단 바는 무입력 복귀(idleTimeoutSeconds)까지 남은 시간이다.
 public class VoltagePanel : WheelPanel
 {
     [SerializeField] private Button lowButton;
     [SerializeField] private Button highButton;
-    [Tooltip("보낼 전력. 비워두면 표시하지 않음")]
-    [SerializeField] private TMP_Text sendText;
+    [SerializeField] private TMP_Text energyText;
+    [SerializeField] private TMP_Text rankText;
 
     private void Awake()
     {
@@ -19,6 +21,7 @@ public class VoltagePanel : WheelPanel
     protected override void Refresh()
     {
         if (Session == null) return;
-        SetText(sendText, $"보낼 전력  <b>{PowerFormat.Kwh(Session.ScaledEnergyWh)}</b> kWh");
+        SetText(energyText, PowerFormat.Wh(Session.ScaledEnergyWh));
+        SetText(rankText, Session.EnergyRank.ToString());
     }
 }

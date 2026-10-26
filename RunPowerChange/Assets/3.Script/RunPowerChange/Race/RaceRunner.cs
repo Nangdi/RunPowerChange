@@ -1,34 +1,62 @@
+using System.Collections.Generic;
 using UnityEngine;
 
-// 쳇바퀴 1대 레인의 3D 캐릭터. 세션의 달린 거리만큼 코스 위를 앞으로 나아간다.
+// 쳇바퀴 1대 레인. 디자이너 맵의 캐릭터(32형)와 바퀴(85형)를 움직인다.
+// 맵은 캐릭터가 제자리에서 뛰고 바닥·기둥이 다가오는 방식이라(RaceStage), 레인은 앞뒤 간격만 바꾼다.
+//
+// 32형은 화면마다 자기 캐릭터를 기준으로 보여 준다. 그래서 캐릭터를 화면 수만큼(Screen1/Screen2 레이어) 두고
+//  - 그 화면의 체험자 캐릭터는 제자리
+//  - 상대 캐릭터는 거리 차만큼 앞(내가 뒤처질 때) 또는 뒤(내가 앞설 때, 화면 밖으로 나가도 됨)로 간다 (RaceStage.ScreenGapZ)
+// 85형 바퀴는 두 레인이 다 보이도록 더 많이 달린 쪽만 앞으로 나간다 (RaceStage.GapZ).
 //
 // 표시 방식
 //  - Player : 자기 쳇바퀴 체험자 (대기 중에는 출발선에 서 있음)
 //  - Leader : 혼자 달리는 회차에서, 참가하지 않은 쪽 레인에 오늘(없으면 전날) 1위 기록을 반투명 고스트로 달리게 한다
-//  - Hidden : 보여 줄 것이 없음 (1위 기록이 아직 없는 등)
-//
-// 같은 캐릭터를 두 벌 만든다.
-//  - 본체(Runner{n} 레이어) : 자기 32형과 85형 카메라가 본다. Leader 일 때는 본체도 반투명
-//  - 복제(Runner{n}Ghost 레이어, 항상 반투명) : 상대 32형 카메라가 본다 → 2인 경주 때 상대가 반투명으로 보임
-// 캐릭터 프리팹에 Animator 가 있으면 "Speed"(m/s) 파라미터를 넘긴다. 없으면 위아래로 통통 튀는 임시 움직임.
+//  - Hidden : 보여 줄 것이 없음 (이번 회차에 참가하지 않았고 1위 기록도 없음)
 public class RaceRunner : MonoBehaviour
 {
     public enum Mode { Hidden, Player, Leader }
 
+    private const int ScreenCount = 2;
+
     [SerializeField] private int wheelId = 1;
     [SerializeField] private WheelSession session;
-    [Tooltip("캐릭터 선택 순서와 같은 순서의 캐릭터 프리팹")]
-    [SerializeField] private GameObject[] characterPrefabs;
-    [Tooltip("반투명 캐릭터용 재질 (URP Lit Transparent). 색은 원래 재질 색에 알파만 바꿔 칠한다.")]
+
+    [Header("32형 캐릭터")]
+    [Tooltip("쳇바퀴 1 화면용 캐릭터. 쳇바퀴 2 화면용은 실행할 때 복제한다")]
+    [SerializeField] private Transform character;
+    [SerializeField] private Animator characterAnimator;
+    [SerializeField] private string runState = "달리기";
+    [SerializeField] private string idleState = "아이들";
+    [Tooltip("이 속도(m/s)일 때 달리기 애니메이션을 1배속으로 재생")]
+    [SerializeField] private float runAnimationMps = 3f;
+    [Tooltip("달리기 애니메이션 배속 범위. 좁을수록 속도가 출렁여도 동작이 자연스럽다")]
+    [SerializeField] private Vector2 runAnimationSpeedRange = new Vector2(0.7f, 1.6f);
+    [Tooltip("이 속도(m/s)보다 빠르면 달리기, runToIdleMps 보다 느리면 서기 (사이 값에서는 지금 동작 유지)")]
+    [SerializeField] private float idleToRunMps = 0.6f;
+    [SerializeField] private float runToIdleMps = 0.25f;
+    [Tooltip("애니메이션에 쓰는 속도의 평활 시간(초). 회전 신호가 띄엄띄엄 와도 배속이 튀지 않게")]
+    [SerializeField] private float animationSmoothingSeconds = 0.6f;
+    [Tooltip("ME 표시와 캐릭터 머리 꼭대기 사이 여백 (유닛)")]
+    [SerializeField] private float headMargin = 0.1f;
+    [Tooltip("반투명 고스트용 재질 (HDRP Lit Transparent). 원래 재질의 텍스처·색에 알파만 낮춰 칠한다.")]
     [SerializeField] private Material ghostMaterial;
-    [SerializeField, Range(0f, 1f)] private float ghostAlpha = 0.35f;
+    [SerializeField, Range(0f, 1f)] private float ghostAlpha = 0.4f;
+
+    [Header("85형 바퀴")]
+    [SerializeField] private Transform wheel;
+    [Tooltip("바퀴 회전·화살표 흐름 애니메이터 (1배속 = 1초에 1바퀴)")]
+    [SerializeField] private Animator[] wheelAnimators;
+    [Tooltip("이 속도(m/s)일 때 바퀴 애니메이션을 1배속으로 재생")]
+    [SerializeField] private float wheelAnimationMps = 3f;
 
     [Header("움직임")]
     [Tooltip("표시 거리가 실제 거리를 따라가는 빠르기")]
     [SerializeField] private float followSharpness = 6f;
-    [SerializeField] private float bobHeight = 0.12f;
-    [Tooltip("1m 를 달릴 때 발걸음 수")]
-    [SerializeField] private float stepsPerMeter = 1.2f;
+    [Tooltip("앞뒤 간격이 바뀌는 빠르기")]
+    [SerializeField] private float gapSharpness = 3f;
+    [Tooltip("32형에서 상대가 내 캐릭터보다 이만큼(유닛) 뒤로 처지면 그 화면에서 숨긴다. 카메라 바로 앞을 크게 지나가지 않게")]
+    [SerializeField] private float hideBehindGap = 1f;
 
     public int WheelId => wheelId;
     public WheelSession Session => session;
@@ -36,140 +64,217 @@ public class RaceRunner : MonoBehaviour
     // 화면에 그려지는 거리(m)
     public float DistanceM { get; private set; }
     public float SpeedMps { get; private set; }
+    public bool IsActive => CurrentMode != Mode.Hidden;
 
     private static readonly int BaseColorId = Shader.PropertyToID("_BaseColor");
-    private static readonly int SpeedParam = Animator.StringToHash("Speed");
+    // HDRP Lit 은 _BaseColorMap, URP Lit 은 _BaseMap
+    private static readonly int[] BaseMapIds = { Shader.PropertyToID("_BaseColorMap"), Shader.PropertyToID("_BaseMap") };
 
-    private GameObject body;
-    private GameObject bodyGhost;
-    private int builtCharacter = -1;
-    private Mode builtMode = Mode.Hidden;
-    private float stepPhase;
+    // 화면별 캐릭터 한 벌 (인덱스 = 화면 wheelId - 1)
+    private class View
+    {
+        public Transform root;
+        public Animator animator;
+        public Renderer[] renderers;
+        public float gapZ;
+    }
+
+    private readonly View[] views = new View[ScreenCount];
+    private Vector3 characterBase;
+    private Vector3 wheelBase;
+    private float wheelGapZ;
+    private bool snapGap = true;
+    private float animSpeedMps;
+    private bool running;
+    private Mode builtMode = (Mode)(-1);
+    private readonly Dictionary<Renderer, Material[]> originalMaterials = new Dictionary<Renderer, Material[]>();
+
+    private void Awake()
+    {
+        if (wheel != null) wheelBase = wheel.localPosition;
+        if (character == null) return;
+
+        characterBase = character.localPosition;
+        for (int i = 0; i < ScreenCount; i++)
+        {
+            Transform root = i == 0 ? character : Instantiate(character, character.parent);
+            if (i > 0) root.name = $"{character.name}_Screen{i + 1}";
+            RaceLayers.SetLayerRecursively(root.gameObject, RaceLayers.Layer(RaceLayers.Screen(i + 1)));
+            Animator anim = i == 0 ? characterAnimator : root.GetComponentInChildren<Animator>(true);
+            views[i] = new View { root = root, animator = anim, renderers = root.GetComponentsInChildren<Renderer>(true) };
+            foreach (var r in views[i].renderers)
+                originalMaterials[r] = r.sharedMaterials;
+        }
+    }
+
+    // 쳇바퀴 screenWheelId 화면에 그려지는 이 레인 캐릭터의 머리 꼭대기 위 (ME 표시 자리, 월드 좌표).
+    // 달리는 동작에 따라 머리 높이가 바뀌므로 메시 범위로 구한다.
+    public Vector3 HeadPoint(int screenWheelId)
+    {
+        View view = ViewFor(screenWheelId);
+        if (view == null) return transform.position;
+        bool any = false;
+        Bounds b = default;
+        foreach (var r in view.renderers)
+        {
+            if (r == null || !r.enabled) continue;
+            if (!any) { b = r.bounds; any = true; }
+            else b.Encapsulate(r.bounds);
+        }
+        if (!any) return view.root.position;
+        return new Vector3(b.center.x, b.max.y + headMargin, b.center.z);
+    }
+
+    private View ViewFor(int screenWheelId)
+    {
+        int i = screenWheelId - 1;
+        return i >= 0 && i < ScreenCount ? views[i] : null;
+    }
 
     private void Update()
     {
-        Resolve(out Mode mode, out float target, out int character);
-
-        if (mode != builtMode || character != builtCharacter) Build(mode, character);
+        Resolve(out Mode mode, out float target);
+        if (mode != builtMode) Apply(mode);
         CurrentMode = mode;
-        if (mode == Mode.Hidden) return;
 
         float dt = Time.unscaledDeltaTime;
         float prev = DistanceM;
-        // 출발선으로 돌아가는 경우(새 체험)는 바로 옮긴다
-        if (target < DistanceM - 0.5f) DistanceM = target;
+        // 출발선으로 돌아가는 경우(새 체험)는 바로 옮기고 앞뒤 간격도 바로 맞춘다
+        if (target < DistanceM - 0.5f)
+        {
+            DistanceM = target;
+            prev = target;
+            snapGap = true;
+        }
         else DistanceM = Mathf.Lerp(DistanceM, target, 1f - Mathf.Exp(-followSharpness * dt));
         float speed = dt > 0f ? Mathf.Max(0f, DistanceM - prev) / dt : 0f;
         SpeedMps = Mathf.Lerp(SpeedMps, speed, 1f - Mathf.Exp(-8f * dt));
-
-        var course = RaceCourse.Instance;
-        if (course != null)
-        {
-            transform.position = course.PositionAt(wheelId, DistanceM);
-            transform.rotation = Quaternion.LookRotation(course.Forward, Vector3.up);
-        }
-
-        Animate(body, dt);
-        Animate(bodyGhost, 0f);
+        if (mode == Mode.Hidden) SpeedMps = 0f;
+        animSpeedMps = Mathf.Lerp(animSpeedMps, SpeedMps, 1f - Mathf.Exp(-dt / Mathf.Max(0.05f, animationSmoothingSeconds)));
     }
 
-    private void Resolve(out Mode mode, out float distance, out int character)
+    // RaceStage 가 레인들의 거리를 본 뒤 화면별 앞뒤 간격과 애니메이션을 정한다
+    public void ApplyStage(RaceStage stage, float dt)
+    {
+        float t = snapGap ? 1f : 1f - Mathf.Exp(-gapSharpness * dt);
+        Vector3 forward = stage.LocalForward;
+        for (int i = 0; i < ScreenCount; i++)
+        {
+            View view = views[i];
+            if (view == null) continue;
+            float target = IsActive ? stage.ScreenGapZ(i + 1, this) : 0f;
+            view.gapZ = Mathf.Lerp(view.gapZ, target, t);
+            view.root.localPosition = characterBase + forward * view.gapZ;
+            bool visible = IsActive && view.gapZ > -hideBehindGap;
+            if (view.root.gameObject.activeSelf != visible)
+            {
+                view.root.gameObject.SetActive(visible);
+                // 다시 켜지면 애니메이터가 기본 동작부터 시작하므로 지금 동작(달리기/서기)으로 맞춘다
+                if (visible && view.animator != null) view.animator.Play(running ? runState : idleState, 0, 0f);
+            }
+        }
+
+        wheelGapZ = Mathf.Lerp(wheelGapZ, IsActive ? stage.GapZ(DistanceM) : 0f, t);
+        if (wheel != null) wheel.localPosition = wheelBase + forward * wheelGapZ;
+        snapGap = false;
+
+        AnimateCharacter();
+        float wheelSpeed = SpeedMps / Mathf.Max(0.1f, wheelAnimationMps);
+        if (wheelAnimators != null)
+            foreach (var a in wheelAnimators)
+                if (a != null) a.speed = wheelSpeed;
+    }
+
+    private void AnimateCharacter()
+    {
+        bool run = running ? animSpeedMps > runToIdleMps : animSpeedMps > idleToRunMps;
+        bool changed = run != running;
+        running = run;
+        float target = run ? Mathf.Clamp(animSpeedMps / Mathf.Max(0.1f, runAnimationMps), runAnimationSpeedRange.x, runAnimationSpeedRange.y) : 1f;
+        foreach (var view in views)
+        {
+            Animator a = view?.animator;
+            if (a == null || !a.isActiveAndEnabled) continue;
+            if (changed) a.CrossFadeInFixedTime(run ? runState : idleState, 0.25f);
+            a.speed = Mathf.Lerp(a.speed, target, 1f - Mathf.Exp(-4f * Time.unscaledDeltaTime));
+        }
+    }
+
+    private void Resolve(out Mode mode, out float distance)
     {
         var round = GameRound.Instance;
-        bool raceActive = round != null && round.Current >= GameRound.Phase.Countdown;
+        bool inRound = round != null && round.Current != GameRound.Phase.Idle;
+        bool participant = round != null && round.IsParticipant(session);
 
         // 혼자 달리는 회차의 빈 레인 → 1위 고스트
-        if (raceActive && round.IsSolo && !round.IsParticipant(session) && round.Ghost != null)
+        if (inRound && !participant && round.RaceActive && round.Ghost != null)
         {
             mode = Mode.Leader;
-            distance = round.Ghost.DistanceAt(round.RunElapsed);
-            character = round.Ghost.characterIndex;
+            distance = round.Current >= GameRound.Phase.Run ? round.Ghost.DistanceAt(round.RunElapsed) : 0f;
             return;
         }
 
-        if (session != null && !(raceActive && round.IsSolo && !round.IsParticipant(session)))
+        // 회차가 열린 뒤에는 참가자 캐릭터만 보인다. 회차가 없을 때(대기)는 두 캐릭터가 출발선에 서 있다.
+        if (session != null && (!inRound || participant))
         {
             mode = Mode.Player;
             distance = session.DistanceM;
-            character = session.CharacterIndex;
             return;
         }
 
         mode = Mode.Hidden;
         distance = 0f;
-        character = -1;
     }
 
-    private void Build(Mode mode, int character)
+    private void Apply(Mode mode)
     {
-        if (body != null) Destroy(body);
-        if (bodyGhost != null) Destroy(bodyGhost);
-        body = bodyGhost = null;
         builtMode = mode;
-        builtCharacter = character;
-        if (mode == Mode.Hidden) return;
-
-        GameObject prefab = PrefabFor(character);
-        if (prefab == null)
+        // 화면별 캐릭터는 ApplyStage 가 앞뒤 간격과 함께 켜고 끈다
+        if (wheel != null) wheel.gameObject.SetActive(mode != Mode.Hidden);
+        SetGhost(mode == Mode.Leader);
+        running = false;
+        snapGap = true;
+        foreach (var view in views)
         {
-            Debug.LogWarning($"[Runner {wheelId}] 캐릭터 프리팹 없음: {character}");
-            return;
+            if (view == null) continue;
+            view.root.gameObject.SetActive(mode != Mode.Hidden);
+            if (view.animator != null && view.animator.isActiveAndEnabled) view.animator.Play(idleState, 0, 0f);
         }
-
-        body = Instantiate(prefab, transform);
-        RaceLayers.SetLayerRecursively(body, RaceLayers.Layer(RaceLayers.Runner(wheelId)));
-        if (mode == Mode.Leader) MakeGhost(body);
-
-        bodyGhost = Instantiate(prefab, transform);
-        bodyGhost.name = prefab.name + "_Ghost";
-        RaceLayers.SetLayerRecursively(bodyGhost, RaceLayers.Layer(RaceLayers.RunnerGhost(wheelId)));
-        MakeGhost(bodyGhost);
     }
 
-    private GameObject PrefabFor(int character)
+    // 모든 재질을 반투명 재질로 바꾸고 원래 텍스처·색에 알파만 낮춰 칠한다
+    private void SetGhost(bool ghost)
     {
-        if (characterPrefabs == null || characterPrefabs.Length == 0) return null;
-        return characterPrefabs[Mathf.Clamp(character, 0, characterPrefabs.Length - 1)];
-    }
-
-    // 모든 재질을 반투명 재질로 바꾸고 원래 색에 알파만 낮춰 칠한다
-    private void MakeGhost(GameObject root)
-    {
-        if (ghostMaterial == null) return;
         var block = new MaterialPropertyBlock();
-        foreach (var r in root.GetComponentsInChildren<Renderer>(true))
+        foreach (var pair in originalMaterials)
         {
-            Material[] original = r.sharedMaterials;
+            Renderer r = pair.Key;
+            if (r == null) continue;
+            Material[] original = pair.Value;
+            if (!ghost || ghostMaterial == null)
+            {
+                r.sharedMaterials = original;
+                for (int i = 0; i < original.Length; i++) r.SetPropertyBlock(null, i);
+                continue;
+            }
+
             var replaced = new Material[original.Length];
             for (int i = 0; i < original.Length; i++) replaced[i] = ghostMaterial;
             r.sharedMaterials = replaced;
-
             for (int i = 0; i < original.Length; i++)
             {
-                Color c = original[i] != null && original[i].HasProperty(BaseColorId) ? original[i].GetColor(BaseColorId) : Color.white;
+                Material m = original[i];
+                Color c = m != null && m.HasProperty(BaseColorId) ? m.GetColor(BaseColorId) : Color.white;
                 c.a = ghostAlpha;
                 block.Clear();
                 block.SetColor(BaseColorId, c);
+                foreach (int id in BaseMapIds)
+                {
+                    Texture tex = m != null && m.HasProperty(id) ? m.GetTexture(id) : null;
+                    if (tex != null) block.SetTexture(id, tex);
+                }
                 r.SetPropertyBlock(block, i);
             }
         }
-    }
-
-    private void Animate(GameObject root, float dt)
-    {
-        if (root == null) return;
-
-        var animator = root.GetComponentInChildren<Animator>();
-        if (animator != null && animator.runtimeAnimatorController != null)
-        {
-            animator.SetFloat(SpeedParam, SpeedMps);
-            return;
-        }
-
-        // 임시 캐릭터: 달리는 속도에 맞춰 통통 튄다 (복제는 본체와 같은 위상)
-        if (dt > 0f) stepPhase += SpeedMps * stepsPerMeter * Mathf.PI * dt;
-        float bob = SpeedMps > 0.2f ? Mathf.Abs(Mathf.Sin(stepPhase)) * bobHeight : 0f;
-        root.transform.localPosition = new Vector3(0f, bob, 0f);
-        root.transform.localRotation = Quaternion.Euler(Mathf.Clamp(SpeedMps * 2.5f, 0f, 15f), 0f, 0f);
     }
 }

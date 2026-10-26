@@ -2,23 +2,22 @@ using System;
 using UnityEngine;
 
 // 쳇바퀴 1대(체험자 1명)의 체험 흐름. 달리기까지는 GameRound 가 두 쳇바퀴를 같은 회차로 묶어 진행하고,
-// 달리기가 끝난 뒤 결과·송전·판매는 각자 진행한다.
+// 달리기가 끝난 뒤 전압 선택·판매·랭킹은 각자 진행한다.
 //
-// Idle ─시작─→ Guide → CharacterSelect → Ready ─(회차)→ Countdown → Run → RunResult → SelectVoltage → Transmit → Result → Idle
-//   └─(회차 진행 중이면)→ WaitNext ─(회차 끝)→ Guide
+// Idle ─시작─→ Join ─(회차)→ Guide → Countdown → Run → SelectVoltage → Sale → Ranking → Idle
+// 옆 쳇바퀴의 회차가 진행 중이면(합류 시간이 지남) 시작할 수 없다. 대기화면에 "체험 중" 안내가 나온다.
 //
+// - 캐릭터는 쳇바퀴마다 정해져 있다 (1 = 왼쪽 파랑 레인 사람, 2 = 오른쪽 분홍 레인 공룡).
 // - 화면(패널)은 OnStateChanged 를 구독하고 아래 공개 값을 읽어 그린다. 버튼은 공개 메서드를 호출한다.
 // - 관전 화면(85형)도 같은 값을 읽는다.
 // - 랭킹(발전왕·판매왕)은 전압을 고를 때 한 번에 기록한다. 중간에 끊긴 체험은 랭킹에 기록하지 않는다.
-// - 달리기 기록(고스트·레코드 라인용)은 달리기가 끝날 때 RaceRecordStore 에 넘긴다.
+// - 달리기 기록(고스트·85형 최고 랭킹 선용)은 달리기가 끝날 때 RaceRecordStore 에 넘긴다.
 public class WheelSession : MonoBehaviour
 {
-    public enum State { Idle, WaitNext, Guide, CharacterSelect, Ready, Countdown, Run, RunResult, SelectVoltage, Transmit, Result }
+    public enum State { Idle, Join, Guide, Countdown, Run, SelectVoltage, Sale, Ranking }
 
     [Tooltip("Setting.json wheels[].wheelId")]
     [SerializeField] private int wheelId = 1;
-    [Tooltip("캐릭터를 고르지 않았을 때 쓸 캐릭터 번호 (RaceRunner 캐릭터 목록 순서)")]
-    [SerializeField] private int defaultCharacter;
 
     [Header("개발자용")]
     [Tooltip("체험 중 남은 시간을 바로 끝내는 키 (에디터 시험용)")]
@@ -32,8 +31,8 @@ public class WheelSession : MonoBehaviour
     public GameRound Round => GameRound.Instance;
     public int CountdownNumber => Round != null ? Round.CountdownNumber : 0;
 
-    // 선택한 캐릭터 번호
-    public int CharacterIndex { get; private set; }
+    // 레인과 캐릭터 번호 (0 = 사람, 1 = 공룡)
+    public int CharacterIndex => Mathf.Max(0, wheelId - 1);
 
     // 발전 체험 값
     public float RunDuration => Mathf.Max(1f, Config.runSeconds);
@@ -51,21 +50,25 @@ public class WheelSession : MonoBehaviour
     // 게이지 최대값: 최대 출력으로 saleScaleMinutes 동안 달렸을 때 (Wh)
     public float MaxScaledEnergyWh => Mathf.Max(0f, Config.maxWatt) * Mathf.Max(0f, Config.saleScaleMinutes) / 60f;
 
-    // 발전 결과 (RunResult 부터 유효). 순위는 아직 기록 전이므로 미리 계산한 값.
+    // 발전 결과 (SelectVoltage 부터 유효). 순위는 아직 기록 전이므로 미리 계산한 값.
     public int EnergyRank { get; private set; }
-    // 판매 결과 (Transmit 부터 유효)
+    // 판매 결과 (Sale 부터 유효)
     public int SelectedVoltageIndex { get; private set; } = -1;
     public SaleResult Sale { get; private set; }
     public int SaleRank { get; private set; }
     // 오늘 체험자 수 (이번 체험 포함)
     public int TodayCount { get; private set; }
-    // 송전 연출 진행률 0~1
-    public float TransmitProgress => Mathf.Clamp01(StateElapsed / Mathf.Max(0.1f, Config.transmitSeconds));
     // 자동 넘김 화면의 남은 시간 비율 1→0 (하단 진행 바). 자동 넘김이 없는 화면은 1.
     public float AutoAdvanceRemaining01
     {
         get
         {
+            if (Current == State.Guide) return Round != null ? Round.GuideRemaining01 : 0f;
+            if (Current == State.SelectVoltage)
+            {
+                float idle = Config.idleTimeoutSeconds;
+                return idle > 0f ? Mathf.Clamp01(1f - (Time.unscaledTime - lastInputTime) / idle) : 1f;
+            }
             float limit = AutoAdvanceSeconds;
             return limit > 0f ? Mathf.Clamp01(1f - StateElapsed / limit) : 1f;
         }
@@ -75,7 +78,7 @@ public class WheelSession : MonoBehaviour
     public PowerRecord LastRecord { get; private set; }
 
     public event Action<WheelSession, State> OnStateChanged;
-    // 랭킹이 갱신됨 (관전 화면 팝업용)
+    // 랭킹이 갱신됨 (관전 화면 랭킹표 갱신용)
     public event Action<WheelSession, PowerRecord> OnRecordAdded;
 
     private static GameDynamicData Config => JsonManager.instance.gameDynamicData;
@@ -94,7 +97,6 @@ public class WheelSession : MonoBehaviour
         if (sensor == null) Debug.LogWarning($"[Wheel {wheelId}] 센서 없음 (WheelSensorLink 또는 Setting.json wheels 확인) - 속도 0으로 진행");
         if (Round == null) Debug.LogError($"[Wheel {wheelId}] 씬에 GameRound 가 없습니다.");
 
-        CharacterIndex = defaultCharacter;
         GoTo(State.Idle);
         ShortcutHelp.Register(this, debugFinishRunKey, "발전 바로 끝내기 (시험용)", "발전 중");
     }
@@ -108,12 +110,8 @@ public class WheelSession : MonoBehaviour
         {
             switch (Current)
             {
-                case State.Guide: return Config.guideSeconds;
-                case State.CharacterSelect: return Config.characterSelectSeconds;
-                case State.RunResult:
-                case State.Result: return Config.resultAutoCloseSeconds;
-                case State.SelectVoltage: return Config.idleTimeoutSeconds;
-                case State.Transmit: return Config.transmitSeconds;
+                case State.Sale: return Config.saleSeconds;
+                case State.Ranking: return Config.resultAutoCloseSeconds;
                 default: return 0f;
             }
         }
@@ -121,40 +119,29 @@ public class WheelSession : MonoBehaviour
 
     private void Update()
     {
+        if (JsonManager.instance == null) return; // 앱 종료 중
         switch (Current)
         {
-            case State.Guide:
-                if (StateElapsed >= Config.guideSeconds) GoTo(State.CharacterSelect);
-                break;
-
-            case State.CharacterSelect:
-                if (StateElapsed >= Config.characterSelectSeconds) SelectCharacter(CharacterIndex);
-                break;
-
             case State.Run:
                 TickRun(Time.unscaledDeltaTime);
                 if (debugFinishRunKey != KeyCode.None && Input.GetKeyDown(debugFinishRunKey)) Round?.DebugFinishRun();
-                break;
-
-            case State.RunResult:
-                if (Config.resultAutoCloseSeconds > 0f && StateElapsed >= Config.resultAutoCloseSeconds) Next();
                 break;
 
             case State.SelectVoltage:
                 // 전압을 고르지 않고 떠나면 랭킹에 기록하지 않고 대기화면으로
                 if (Config.idleTimeoutSeconds > 0f && Time.unscaledTime - lastInputTime >= Config.idleTimeoutSeconds)
                 {
-                    Debug.Log($"[Wheel {wheelId}] 무입력 {Config.idleTimeoutSeconds}s - 대기화면 복귀");
+                    Debug.Log($"[Wheel {wheelId}] 무입력 {Config.idleTimeoutSeconds}s - 기록 없이 대기화면 복귀");
                     GoTo(State.Idle);
                 }
                 break;
 
-            case State.Transmit:
-                if (TransmitProgress >= 1f) GoTo(State.Result);
+            case State.Sale:
+                if (StateElapsed >= Config.saleSeconds) GoTo(State.Ranking);
                 break;
 
-            case State.Result:
-                if (Config.resultAutoCloseSeconds > 0f && StateElapsed >= Config.resultAutoCloseSeconds) GoTo(State.Idle);
+            case State.Ranking:
+                if (StateElapsed >= Config.resultAutoCloseSeconds) GoTo(State.Idle);
                 break;
         }
     }
@@ -164,28 +151,12 @@ public class WheelSession : MonoBehaviour
     // 아무 터치나 들어왔을 때 (무입력 타이머 초기화)
     public void NotifyInput() => lastInputTime = Time.unscaledTime;
 
-    // 대기화면의 체험 시작
+    // 대기화면의 체험 시작, 참가 대기화면의 참여하기
     public void StartExperience()
     {
         NotifyInput();
         if (Current != State.Idle || Round == null) return;
-        GoTo(Round.RequestJoin(this) ? State.Guide : State.WaitNext);
-    }
-
-    // 캐릭터 선택 (선택 화면에서 고르거나 시간이 다 되면)
-    public void SelectCharacter(int index)
-    {
-        NotifyInput();
-        if (Current != State.CharacterSelect) return;
-        CharacterIndex = Mathf.Max(0, index);
-        GoTo(State.Ready);
-    }
-
-    // 발전 완료 화면의 "송전 체험 시작하기" (자동 넘김과 같은 동작)
-    public void Next()
-    {
-        NotifyInput();
-        if (Current == State.RunResult) GoTo(State.SelectVoltage);
+        if (Round.RequestJoin(this)) GoTo(State.Join);
     }
 
     // 송전전압 선택 (Setting.json voltages 의 순서)
@@ -204,17 +175,12 @@ public class WheelSession : MonoBehaviour
         SelectedVoltageIndex = index;
         Sale = PowerModel.Sell(AverageWatt, voltage, Config);
         CommitRecord();
-        GoTo(State.Transmit);
+        GoTo(State.Sale);
     }
 
     // ── GameRound 에서 호출 ─────────────────────────────
 
-    // 다음 회차 대기 중이던 세션을 새 회차에 넣는다
-    public void StartFromQueue()
-    {
-        if (Current != State.WaitNext || Round == null) return;
-        if (Round.RequestJoin(this)) GoTo(State.Guide);
-    }
+    public void BeginGuide() => GoTo(State.Guide);
 
     public void BeginCountdown()
     {
@@ -250,7 +216,7 @@ public class WheelSession : MonoBehaviour
         }
 
         Debug.Log($"[Wheel {wheelId}] 발전 종료: {EnergyWh:0.00}Wh, {DistanceM:0}m, 평균 {AverageWatt:0}W, 발전 {EnergyRank}/{TodayCount}위");
-        GoTo(State.RunResult);
+        GoTo(State.SelectVoltage);
     }
 
     // ── 내부 ───────────────────────────────────────────
@@ -278,7 +244,7 @@ public class WheelSession : MonoBehaviour
         EnergyWh += Watt * dt / 3600f;
         MaxSpeedKmh = Mathf.Max(MaxSpeedKmh, SpeedKmh);
 
-        // 고스트·레코드 라인용 시간별 거리
+        // 고스트·최고 랭킹 선용 시간별 거리
         while (track != null && RunElapsed >= nextSampleTime)
         {
             track.samples.Add(DistanceM);
@@ -316,7 +282,6 @@ public class WheelSession : MonoBehaviour
             ResetRunValues();
             Round?.Leave(this);
         }
-        if (next == State.Guide) CharacterIndex = defaultCharacter;
 
         Current = next;
         stateEnterTime = Time.unscaledTime;

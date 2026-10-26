@@ -20,6 +20,7 @@ using UnityEngine.UI;
 // [숫자 설정을 추가하는 방법] (Setting.json = GameDynamicData 의 float/int 필드)
 //  1) 씬의 설정창에 TMP_InputField 를 하나 만든다.
 //  2) 아래 numberSettings 목록에 (필드 이름, InputField, 최소/최대)를 연결한다.
+//     목록 안의 값은 경로로 적는다 (예: voltages[1].facilityCostWon, wheels[0].displayIndex).
 // 입력을 마치면 범위를 맞춰 persistentDataPath/Setting.json 에 바로 저장한다.
 public class SettingsPanelUI : MonoBehaviour
 {
@@ -27,7 +28,7 @@ public class SettingsPanelUI : MonoBehaviour
     [Serializable]
     public class NumberSetting
     {
-        [Tooltip("GameDynamicData 안의 float/int 필드 이름 (예: runSeconds)")]
+        [Tooltip("GameDynamicData 안의 float/int 필드 이름 또는 경로 (예: runSeconds, voltages[1].lossRate)")]
         public string fieldName;
         public TMP_InputField input;
         public float min = 0f;
@@ -239,7 +240,8 @@ public class SettingsPanelUI : MonoBehaviour
         foreach (var setting in numberSettings)
         {
             if (setting == null || setting.field == null || setting.input == null || jm.gameDynamicData == null) continue;
-            setting.input.SetTextWithoutNotify(FormatNumber(setting.field.GetValue(jm.gameDynamicData)));
+            object owner = ResolveOwner(jm.gameDynamicData, setting.fieldName);
+            if (owner != null) setting.input.SetTextWithoutNotify(FormatNumber(setting.field.GetValue(owner)));
         }
         _syncing = false;
     }
@@ -247,13 +249,14 @@ public class SettingsPanelUI : MonoBehaviour
     // 인스펙터에 적은 필드 이름을 GameDynamicData 의 float/int 필드와 연결한다.
     private void BindNumberFields()
     {
-        var type = typeof(GameDynamicData);
+        var data = JsonManager.instance != null ? JsonManager.instance.gameDynamicData : new GameDynamicData();
         foreach (var setting in numberSettings)
         {
             if (setting == null) continue;
             setting.field = null;
 
-            var field = string.IsNullOrEmpty(setting.fieldName) ? null : type.GetField(setting.fieldName, BindingFlags.Public | BindingFlags.Instance);
+            object owner = string.IsNullOrEmpty(setting.fieldName) ? null : ResolveOwner(data, setting.fieldName);
+            var field = owner == null ? null : owner.GetType().GetField(LastName(setting.fieldName), BindingFlags.Public | BindingFlags.Instance);
             if (field == null)
             {
                 Debug.LogError($"[Settings] GameDynamicData 에 '{setting.fieldName}' 필드가 없습니다.", this);
@@ -288,14 +291,49 @@ public class SettingsPanelUI : MonoBehaviour
             return;
         }
 
+        object target = ResolveOwner(jm.gameDynamicData, setting.fieldName);
+        if (target == null)
+        {
+            Debug.LogWarning($"[Settings] '{setting.fieldName}' 항목을 찾지 못함 (목록 길이 확인)", this);
+            return;
+        }
         value = Mathf.Clamp(value, setting.min, setting.max);
         object boxed = setting.field.FieldType == typeof(int) ? (object)Mathf.RoundToInt(value) : value;
-        setting.field.SetValue(jm.gameDynamicData, boxed);
+        setting.field.SetValue(target, boxed);
         jm.SaveGameDynamicData();               // persistentDataPath/Setting.json 에 바로 저장
         SyncFromData();                         // 범위 보정된 값 표시
 
         Debug.Log($"[Settings] {setting.fieldName} = {boxed}");
         OnNumberChanged?.Invoke(setting.fieldName, value);
+    }
+
+    // 경로 "a[1].b.c" 에서 마지막 필드(c)를 가진 객체를 찾는다. 없으면 null.
+    private static object ResolveOwner(object root, string path)
+    {
+        object current = root;
+        string[] parts = path.Split('.');
+        for (int i = 0; i < parts.Length - 1 && current != null; i++)
+            current = Step(current, parts[i]);
+        return current;
+    }
+
+    // "name" 또는 "name[index]" 한 칸 내려간다
+    private static object Step(object obj, string part)
+    {
+        int bracket = part.IndexOf('[');
+        string name = bracket >= 0 ? part.Substring(0, bracket) : part;
+        var field = obj.GetType().GetField(name, BindingFlags.Public | BindingFlags.Instance);
+        object value = field != null ? field.GetValue(obj) : null;
+        if (bracket < 0 || value == null) return value;
+        if (!int.TryParse(part.Substring(bracket + 1).TrimEnd(']'), out int index)) return null;
+        return value is System.Collections.IList list && index >= 0 && index < list.Count ? list[index] : null;
+    }
+
+    private static string LastName(string path)
+    {
+        string last = path.Substring(path.LastIndexOf('.') + 1);
+        int bracket = last.IndexOf('[');
+        return bracket >= 0 ? last.Substring(0, bracket) : last;
     }
 
     private static string FormatNumber(object value)

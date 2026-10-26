@@ -42,6 +42,25 @@ public static class PowerModel
         return seconds > 0f ? energyWh * 3600f / seconds : 0f;
     }
 
+    // 판매단가(원/kWh). 기준 속도(saleReferenceKmh)로 끝까지 달리고 가장 유리한 전압을 고르면 판매 금액이 saleReferenceWon 이 되는 값.
+    // 출력·환산 시간·손실률·설비 비용을 바꿔도 기준 체험자의 판매 금액은 그대로 유지된다.
+    public static float WonPerKWh(GameDynamicData cfg)
+    {
+        float sentWh = WattFromSpeed(Mathf.Max(0f, cfg.saleReferenceKmh), cfg) * Mathf.Max(0f, cfg.saleScaleMinutes) / 60f;
+        float best = float.MaxValue;
+        if (cfg.voltages != null)
+        {
+            foreach (var v in cfg.voltages)
+            {
+                if (v == null) continue;
+                float arrivedKWh = sentWh * (1f - Mathf.Clamp01(v.lossRate)) / 1000f;
+                if (arrivedKWh <= 0f) continue;
+                best = Mathf.Min(best, (Mathf.Max(0f, cfg.saleReferenceWon) + Mathf.Max(0f, v.facilityCostWon)) / arrivedKWh);
+            }
+        }
+        return best == float.MaxValue ? 0f : best;
+    }
+
     public static VoltageOption GetVoltage(GameDynamicData cfg, int index)
     {
         if (cfg.voltages == null || index < 0 || index >= cfg.voltages.Count) return null;
@@ -62,7 +81,7 @@ public static class PowerModel
         };
         r.lossWh = r.sentWh * loss;
         r.arrivedWh = r.sentWh - r.lossWh;
-        r.grossWon = r.arrivedWh / 1000f * Mathf.Max(0f, cfg.smpWonPerKWh);
+        r.grossWon = r.arrivedWh / 1000f * WonPerKWh(cfg);
         r.facilityCostWon = Mathf.Max(0f, voltage.facilityCostWon);
         r.saleWon = Mathf.Max(0f, r.grossWon - r.facilityCostWon);
         return r;

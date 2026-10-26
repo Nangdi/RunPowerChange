@@ -7,18 +7,18 @@ using UnityEngine;
 using UnityEngine.SceneManagement;
 using UnityEngine.UI;
 using static PowerUIKit;
-using L = PowerStaticLayouts;
 
-// 달려라! 전력 챌린지 화면 프리팹을 만들고 현재 씬에 배치한다.
+// 달려라! 전력 챌린지 화면 프리팹을 디자이너 PSD 좌표대로 만들고 현재 씬에 배치한다.
 // 메뉴: Tools > 달려라 전력 챌린지 > 1. 프리팹 생성 및 씬 적용
+// 먼저 Tools/psd_export.py 로 PSD 에서 이미지와 좌표(4.Sprite/_Layout/psd_layout.json)를 뽑아 둔다.
 //
 // 구조
 //  Canvas_Wheel.prefab (WheelScreen)          32형 2대. 씬에 Canvas_Wheel_1, _2 로 배치, 세션은 인스턴스에서 연결
-//   └ Frame (1920x1080) └ Panel_xxx.prefab (10개)
+//   └ Frame (1920x1080) └ Panel_xxx.prefab (8개)
 //      ├ StaticLayer  : 정적 PNG 한 장 (4.Sprite/Static/Static_xxx.png, 배경 투명 - 뒤에 3D 경주 장면)
-//      └ 동적 요소    : 버튼, 값 글자, 게이지(Gauge 부품), 랭킹 줄(RankRow 런타임 생성)
+//      └ 동적 요소    : 버튼, 숫자 글자, 게이지, 순서대로 나타나는 카드
 //  Canvas_Spectator.prefab (SpectatorScreen)  85형 세로. 씬에 1개
-//   └ Frame (1080x1920) └ Panel_Spectator.prefab (Player 칸 2개 = 3D 카메라 자리, 랭킹 표, 새 랭킹 팝업)
+//   └ Frame (2160x3840) └ Panel_Spectator.prefab (상태·발전량 글자, 오늘 최고 랭킹 표시, 아래 칸 3개)
 //
 // 이미 있는 프리팹은 덮어쓰지 않는다. 직접 수정한 프리팹을 지키기 위해서다.
 // 구조가 바뀌어 처음부터 다시 만들려면 BuildAll(rebuild: true) 를 쓴다 (같은 경로에 덮어써서 GUID 유지).
@@ -27,9 +27,11 @@ public static class PowerPrefabBuilder
     private const string CanvasInstancePrefix = "Canvas_Wheel_";
     private const string SpectatorInstanceName = "Canvas_Spectator";
 
-    private static GameObject rankRowPrefab;
-    private static GameObject gaugePrefab;
     private static bool rebuildAll;
+    // 카드 안 숫자가 카드 가장자리에 닿지 않게 두는 여백(px)
+    private const float CardPadding = 36f;
+    // 지금 만드는 패널의 화면 크기 (PSD 좌표 변환용)
+    private static Vector2 screen = ReferenceResolution;
 
     [MenuItem("Tools/달려라 전력 챌린지/1. 프리팹 생성 및 씬 적용", priority = 1)]
     public static void BuildAllMenu() => BuildAll(false);
@@ -37,38 +39,32 @@ public static class PowerPrefabBuilder
     public static void BuildAll(bool rebuild)
     {
         rebuildAll = rebuild;
+        ReloadLayout();
         try
         {
-            PowerSpriteExporter.Export(overwrite: false);
-            EnsureFolder(PartPrefabDir);
             EnsureFolder(PanelPrefabDir);
 
-            // 부품
-            rankRowPrefab = GetOrCreate(PartPrefabPath("RankRow"), CreateRankRow);
-            gaugePrefab = GetOrCreate(PartPrefabPath("Gauge"), CreateGauge);
-
-            // 패널
             var panelBuilders = new Dictionary<string, Func<GameObject>>
             {
                 { "Idle", CreateIdlePanel },
-                { "WaitNext", CreateWaitNextPanel },
+                { "Join", CreateJoinPanel },
                 { "Guide", CreateGuidePanel },
-                { "CharacterSelect", CreateCharacterSelectPanel },
                 { "Countdown", CreateCountdownPanel },
                 { "Run", CreateRunPanel },
-                { "RunResult", CreateRunResultPanel },
                 { "Voltage", CreateVoltagePanel },
-                { "Transmit", CreateTransmitPanel },
-                { "Result", CreateResultPanel },
+                { "Sale", CreateSalePanel },
+                { "Ranking", CreateRankingPanel },
             };
+            screen = ReferenceResolution;
             var panels = new List<GameObject>();
             foreach (string panel in PanelNames)
                 panels.Add(GetOrCreate(PanelPrefabPath(panel), panelBuilders[panel]));
-
             GameObject canvasPrefab = GetOrCreate(CanvasPrefabPath, () => CreateCanvas(panels));
 
+            screen = SpectatorResolution;
             GameObject spectatorPanel = GetOrCreate(PanelPrefabPath(SpectatorName), CreateSpectatorPanel);
             GameObject spectatorPrefab = GetOrCreate(SpectatorPrefabPath, () => CreateSpectatorCanvas(spectatorPanel));
+            screen = ReferenceResolution;
 
             ApplyToScene(canvasPrefab);
             ApplySpectatorToScene(spectatorPrefab);
@@ -79,6 +75,7 @@ public static class PowerPrefabBuilder
         finally
         {
             rebuildAll = false;
+            screen = ReferenceResolution;
         }
     }
 
@@ -98,158 +95,125 @@ public static class PowerPrefabBuilder
 
     private static Sprite Part(string name) => LoadSprite(PartSpritePath(name));
 
-    // 글자가 구워진 스프라이트 버튼 (스프라이트 크기 = 배치 크기)
-    private static Button CreateSpriteButton(RectTransform parent, string name, string sprite, Vector2 pos, Vector2 size)
+    // PSD 사각형 자리에 놓는 빈 RectTransform
+    private static RectTransform PsdRect(RectTransform parent, string name, string rectName)
     {
-        RectTransform rt = Place(CreateRect(name, parent), pos, size);
-        Image image = AddSprite(rt, Part(sprite));
-        image.type = Image.Type.Simple;
-        image.preserveAspect = true;
-        image.raycastTarget = true;
-        var button = rt.gameObject.AddComponent<Button>();
-        button.targetGraphic = image;
-        return button;
+        Rect r = Psd(rectName);
+        return Place(CreateRect(name, parent), PsdCenter(r, screen), r.size);
     }
 
-    // 표시만 하는 글자 구운 스프라이트
-    private static Image CreateSpriteImage(RectTransform parent, string name, string sprite, Vector2 pos, Vector2 size)
+    // 디자이너 부품 그림 (그림 크기 = PSD 자리 크기)
+    private static Image PartImage(RectTransform parent, string name, string sprite, string rectName = null)
     {
-        Image image = AddSprite(Place(CreateRect(name, parent), pos, size), Part(sprite));
-        image.type = Image.Type.Simple;
+        Image image = AddSprite(PsdRect(parent, name, rectName ?? sprite), Part(sprite));
         image.preserveAspect = true;
         return image;
     }
 
-    // 값 글자 (굵게, 한 줄, 넘치면 자동 축소)
-    private static TMP_Text CreateValue(RectTransform parent, string name, string sample, Vector2 pos, Vector2 size, float fontSize,
-        Color? color = null, TextAlignmentOptions alignment = TextAlignmentOptions.Center)
+    private static Button PartButton(RectTransform parent, string name, string sprite)
     {
-        TextMeshProUGUI text = CreateText(parent, name, sample, pos, size, fontSize, color ?? TextColor, true, alignment);
+        Image image = PartImage(parent, name, sprite);
+        image.raycastTarget = true;
+        var button = image.gameObject.AddComponent<Button>();
+        button.targetGraphic = image;
+        return button;
+    }
+
+    private static void WireColor(UnityEngine.Object target, params (string field, Color value)[] pairs)
+    {
+        var so = new SerializedObject(target);
+        foreach (var (field, value) in pairs) so.FindProperty(field).colorValue = value;
+        so.ApplyModifiedPropertiesWithoutUndo();
+    }
+
+    // 아래 끝 가운데를 피벗으로 둔 부품 그림 (3D 위치를 따라다니는 표시)
+    private static Image TagImage(RectTransform parent, string sprite)
+    {
+        Image image = PartImage(parent, sprite, sprite);
+        RectTransform rt = image.rectTransform;
+        rt.pivot = new Vector2(0.5f, 0f);
+        rt.anchoredPosition -= new Vector2(0f, rt.sizeDelta.y * 0.5f);
+        return image;
+    }
+
+    // 남색 반투명 둥근 상자 (Unity 기본 UI 스프라이트 9-slice). PSD 에 없는 안내 문구 바탕용.
+    private static Image RoundBox(RectTransform parent, string name, Vector2 psdCenter, Vector2 size)
+    {
+        Image box = AddSprite(Place(CreateRect(name, parent), PsdPoint(psdCenter, screen), size),
+            AssetDatabase.GetBuiltinExtraResource<Sprite>("UI/Skin/UISprite.psd"), new Color(TextColor.r, TextColor.g, TextColor.b, 0.85f));
+        box.type = Image.Type.Sliced;
+        box.pixelsPerUnitMultiplier = 0.1f;
+        return box;
+    }
+
+    // 왼쪽에서 오른쪽으로 채워지는 게이지 그림
+    private static Image FilledImage(RectTransform parent, string name, string sprite, string rectName = null)
+    {
+        Image image = PartImage(parent, name, sprite, rectName);
+        image.preserveAspect = false;
+        image.type = Image.Type.Filled;
+        image.fillMethod = Image.FillMethod.Horizontal;
+        image.fillOrigin = (int)Image.OriginHorizontal.Left;
+        image.fillAmount = 0.7f;
+        return image;
+    }
+
+    private static GaugeView CreateGauge(RectTransform parent, string name, string sprite, string rectName = null, params Image[] followers)
+    {
+        Image fill = FilledImage(parent, name, sprite, rectName);
+        var view = fill.gameObject.AddComponent<GaugeView>();
+        Wire(view, ("fill", fill));
+        WireList(view, "followers", Array.ConvertAll(followers, f => (UnityEngine.Object)f));
+        return view;
+    }
+
+    // 자동 넘김 화면 하단 남은 시간 바 (같은 그림을 화면마다 같은 자리에 둔다)
+    private static void CreateAutoGauge(RectTransform panel, WheelPanel view, string rectName)
+    {
+        GaugeView gauge = CreateGauge(panel, "AutoGauge", "Auto_Gauge", rectName);
+        Wire(view, ("autoGauge", gauge));
+    }
+
+    // PSD 글자 자리(잉크 영역)에 맞춘 값 글자. 한 줄, 넘치면 자동 축소. 세로는 글자 모양(잉크) 가운데를 맞춘다.
+    // align 이 Left/Right 면 PSD 글자의 왼쪽/오른쪽 끝을 기준으로 width 만큼 늘린다.
+    // baseline 이 true 면 PSD 숫자 잉크의 아래 끝(= 기준선)에 글자 기준선을 맞춘다. 옆에 단위(wh, 위, ₩)가 그림으로 붙어 있는 숫자용:
+    // 값이 길어져 자동 축소돼도 단위와 같은 기준선에 앉는다.
+    private static TMP_Text PsdText(RectTransform parent, string name, string rectName, string sample, float fontSize, Color color,
+        Weight weight, HorizontalAlignmentOptions align = HorizontalAlignmentOptions.Center, float width = 0f, bool baseline = false)
+    {
+        Rect r = Psd(rectName);
+        float w = Mathf.Max(width, r.width + 20f);
+        float cx = align == HorizontalAlignmentOptions.Left ? r.xMin + w * 0.5f
+            : align == HorizontalAlignmentOptions.Right ? r.xMax - w * 0.5f
+            : r.center.x;
+        TMP_Text text = ValueText(parent, name, sample, new Vector2(cx, baseline ? r.yMax : r.center.y), new Vector2(w, fontSize * 1.4f),
+            fontSize, color, weight, align);
+        if (baseline) text.verticalAlignment = VerticalAlignmentOptions.Baseline;
+        return text;
+    }
+
+    private static TMP_Text ValueText(RectTransform parent, string name, string sample, Vector2 psdCenter, Vector2 size, float fontSize,
+        Color color, Weight weight, HorizontalAlignmentOptions align)
+    {
+        TextMeshProUGUI text = AddText(Place(CreateRect(name, parent), PsdPoint(psdCenter, screen), size), sample, fontSize, color, weight);
+        text.horizontalAlignment = align;
+        text.verticalAlignment = VerticalAlignmentOptions.Geometry;
         text.enableWordWrapping = false;
+        text.overflowMode = TextOverflowModes.Overflow;
         text.enableAutoSizing = true;
-        text.fontSizeMin = fontSize * 0.5f;
+        text.fontSizeMin = fontSize * 0.4f;
         text.fontSizeMax = fontSize;
         return text;
     }
 
-    // 색 칠한 둥근 상자 (Card_Bg 9-slice)
-    private static Image CreateBox(RectTransform parent, string name, Vector2 pos, Vector2 size, Color color)
+    private static CanvasGroup Group(RectTransform parent, string name)
     {
-        return AddSprite(Place(CreateRect(name, parent), pos, size), Part("Card_Bg"), color);
+        RectTransform rt = StretchFull(CreateRect(name, parent));
+        return rt.gameObject.AddComponent<CanvasGroup>();
     }
 
-    // Gauge 부품 인스턴스 (중첩 프리팹 링크 유지). trackColor 가 null 이면 바탕을 숨긴다 (정적 레이어가 그림).
-    private static GaugeView CreateGauge(RectTransform parent, string name, Vector2 pos, Vector2 size, Color fillColor, Color? trackColor)
-    {
-        var go = (GameObject)PrefabUtility.InstantiatePrefab(gaugePrefab, parent);
-        go.name = name;
-        Place((RectTransform)go.transform, pos, size);
-        go.transform.Find("Fill").GetComponent<Image>().color = fillColor;
-        Image track = go.transform.Find("Track").GetComponent<Image>();
-        track.color = trackColor ?? Color.clear;
-        return go.GetComponent<GaugeView>();
-    }
-
-    // 자동 넘김 화면 하단 남은 시간 바
-    private static GaugeView CreateAutoGauge(RectTransform panel)
-    {
-        return CreateGauge(panel, "AutoGauge", L.AutoGaugePos, L.AutoGaugeSize, AccentColor, new Color(1f, 1f, 1f, 0.85f));
-    }
-
-    // 원형 남은 시간: 주황 원(Filled) 위에 흰 원, 그 위에 숫자
-    private static (Image ring, TMP_Text text) CreateTimer(RectTransform panel)
-    {
-        RectTransform ringRt = Place(CreateRect("TimerRing", panel), L.TimerPos, Vector2.one * L.TimerSize);
-        Image ring = AddSprite(ringRt, Part("Circle"), AccentColor);
-        ring.type = Image.Type.Filled;
-        ring.fillMethod = Image.FillMethod.Radial360;
-        ring.fillOrigin = (int)Image.Origin360.Top;
-        ring.fillClockwise = false;
-        ring.fillAmount = 0.7f;
-        AddSprite(Place(CreateRect("TimerInner", panel), L.TimerPos, Vector2.one * (L.TimerSize - 30)), Part("Circle"), Color.white);
-        TMP_Text text = CreateValue(panel, "TimerText", "42", L.TimerPos, Vector2.one * (L.TimerSize - 40), 70, TextColor);
-        return (ring, text);
-    }
-
-    private static RectTransform CreateRankList(RectTransform panel, Vector2 pos, Vector2 size, out GameObject gapMark)
-    {
-        RectTransform list = Place(CreateRect("RankList", panel), pos, size);
-        var layout = list.gameObject.AddComponent<VerticalLayoutGroup>();
-        layout.spacing = 6;
-        layout.childAlignment = TextAnchor.UpperCenter;
-        layout.childControlWidth = true;
-        layout.childControlHeight = true;
-        layout.childForceExpandWidth = true;
-        layout.childForceExpandHeight = false;
-
-        TMP_Text gap = AddText(CreateRect("GapMark", list), "...", 28, SubTextColor, true);
-        gap.gameObject.AddComponent<LayoutElement>().preferredHeight = 26;
-        gapMark = gap.gameObject;
-        gapMark.SetActive(false);
-        return list;
-    }
-
-    private static void WireAutoGauge(WheelPanel view, GaugeView gauge) => Wire(view, ("autoGauge", gauge));
-
-    #endregion
-
-    #region 부품 프리팹
-
-    // 랭킹 한 줄: 순위 / 최고속도 / 누적발전량 / 송전중손실 / 도착한전력 / 판매금액. Highlight = 방금 체험한 기록
-    private static GameObject CreateRankRow()
-    {
-        RectTransform root = CreateRect("RankRow", null);
-        root.sizeDelta = new Vector2(820, 54);
-        root.gameObject.AddComponent<LayoutElement>().preferredHeight = 54;
-        AddSprite(root, Part("RankRow_Bg"), new Color32(242, 243, 247, 255));
-
-        RectTransform highlight = StretchFull(CreateRect("Highlight", root));
-        AddSprite(highlight, Part("RankRow_Bg"), new Color(AccentColor.r, AccentColor.g, AccentColor.b, 0.28f));
-        highlight.gameObject.SetActive(false);
-
-        float[] c = L.RankColumns;
-        RectTransform rankCell = Stretch(CreateRect("RankCell", root), new Vector2(c[0], 0f), new Vector2(c[1], 1f));
-        RectTransform badge = Place(CreateRect("FirstBadge", rankCell), Vector2.zero, new Vector2(40, 40));
-        AddSprite(badge, Part("Dot"), AccentColor);
-        badge.gameObject.SetActive(false);
-
-        TMP_Text Cell(string name, RectTransform parent, float x0, float x1, string sample, float size, Color color)
-        {
-            TMP_Text t = AddText(Stretch(CreateRect(name, parent), new Vector2(x0, 0f), new Vector2(x1, 1f)), sample, size, color, true);
-            t.enableWordWrapping = false;
-            t.enableAutoSizing = true;
-            t.fontSizeMin = size * 0.6f;
-            t.fontSizeMax = size;
-            return t;
-        }
-
-        TMP_Text rank = Cell("Rank", rankCell, 0f, 1f, "1", 26, TextColor);
-        TMP_Text speed = Cell("Speed", root, c[1], c[2], "11.2", 28, BlueColor);
-        TMP_Text energy = Cell("Energy", root, c[2], c[3], "18.0", 28, GreenColor);
-        TMP_Text loss = Cell("Loss", root, c[3], c[4], "-0.9", 28, YellowColor);
-        TMP_Text arrived = Cell("Arrived", root, c[4], c[5], "17.1", 28, AccentColor);
-        TMP_Text sale = Cell("Sale", root, c[5], c[6], "2,565", 30, TextColor);
-
-        var view = root.gameObject.AddComponent<RankRowView>();
-        Wire(view, ("rankText", rank), ("speedText", speed), ("energyText", energy), ("lossText", loss), ("arrivedText", arrived),
-            ("saleText", sale), ("firstBadge", badge.gameObject), ("highlight", highlight.gameObject));
-        return root.gameObject;
-    }
-
-    // 가로 게이지: Track(바탕) + Fill(채움, 오른쪽 앵커로 길이 조절)
-    private static GameObject CreateGauge()
-    {
-        RectTransform root = CreateRect("Gauge", null);
-        root.sizeDelta = new Vector2(800, 24);
-        AddSprite(StretchFull(CreateRect("Track", root)), Part("Gauge_Bg"), GaugeTrackColor);
-
-        RectTransform fill = Stretch(CreateRect("Fill", root), Vector2.zero, new Vector2(0.6f, 1f));
-        AddSprite(fill, Part("Gauge_Bg"), AccentColor);
-
-        var view = root.gameObject.AddComponent<GaugeView>();
-        Wire(view, ("fill", fill));
-        return root.gameObject;
-    }
+    private static UnityEngine.Object[] Objects(params Component[] items) =>
+        Array.ConvertAll(items, c => c != null ? (UnityEngine.Object)c.gameObject : null);
 
     #endregion
 
@@ -258,8 +222,7 @@ public static class PowerPrefabBuilder
     private static RectTransform CreatePanelRoot(string panel)
     {
         RectTransform root = StretchFull(CreateRect($"Panel_{panel}", null));
-        Image staticLayer = AddSprite(StretchFull(CreateRect(StaticLayerName, root)), LoadSprite(StaticSpritePath(panel)));
-        staticLayer.type = Image.Type.Simple;
+        AddSprite(StretchFull(CreateRect(StaticLayerName, root)), LoadSprite(StaticSpritePath(panel)));
         return root;
     }
 
@@ -267,15 +230,17 @@ public static class PowerPrefabBuilder
     {
         RectTransform panel = CreatePanelRoot("Idle");
 
-        // 합류 안내 (옆 쳇바퀴가 먼저 시작했을 때)
-        RectTransform join = Place(CreateRect("Group_Join", panel), L.JoinBoxPos, L.JoinBoxSize);
-        AddSprite(join, Part("Card_Bg"), new Color(AccentColor.r, AccentColor.g, AccentColor.b, 0.95f));
-        TMP_Text joinText = AddText(Stretch(CreateRect("Text", join), Vector2.zero, Vector2.one, 12),
-            "옆 쳇바퀴에서 체험을 시작했어요!\n<b>12초</b> 안에 시작하면 함께 달려요", 34, Color.white);
-        join.gameObject.SetActive(false);
-
         // 시작 버튼 그림은 표시만 하고, 터치는 화면 전체를 덮는 투명 버튼이 받는다
-        CreateSpriteImage(panel, "StartBadge", "Button_Start", L.StartButtonPos, L.StartButtonSize);
+        Image badge = PartImage(panel, "StartBadge", "Button_Start");
+
+        // 옆 쳇바퀴 체험 진행 중 안내 (버튼 바로 위)
+        Rect button = Psd("Button_Start");
+        RectTransform busy = StretchFull(CreateRect("Group_Busy", panel));
+        Image busyBox = RoundBox(busy, "Box", new Vector2(960f, button.yMin - 50f), new Vector2(1180f, 72f));
+        TMP_Text busyText = AddText(StretchFull(CreateRect("Text", busyBox.rectTransform)),
+            $"지금 <color={YellowHex}>다른 체험</color>이 진행 중이에요. 약 90초 후 체험할 수 있어요.", 34, WhiteColor, Weight.SemiBold);
+        busyText.enableWordWrapping = false;
+        busy.gameObject.SetActive(false);
 
         RectTransform touch = StretchFull(CreateRect("StartButton", panel));
         Image touchImage = AddImage(touch, new Color(0, 0, 0, 0));
@@ -285,34 +250,64 @@ public static class PowerPrefabBuilder
         start.transition = Selectable.Transition.None;
 
         var view = panel.gameObject.AddComponent<IdlePanel>();
-        Wire(view, ("startButton", start), ("joinGroup", join.gameObject), ("joinText", joinText));
+        Wire(view, ("startButton", start), ("startBadge", badge), ("busyGroup", busy.gameObject), ("busyText", busyText));
+        WireColor(view, ("highlightColor", YellowColor));
         return panel.gameObject;
     }
 
-    // 3단계 안내 카드의 동적 숫자·문구 (Guide, WaitNext 공용)
-    private static void CreateStepTexts(RectTransform panel, GuidePanel view, float y, float scale)
+    private static GameObject CreateJoinPanel()
     {
-        Vector2 card = new Vector2(L.StepX[2] * scale, y);
-        Vector2 circle = Vector2.one * (L.StepCircleSize - 20) * scale;
-        TMP_Text run = CreateValue(panel, "RunSecondsText", "50", card + new Vector2(-L.StepCircleOffsetX, L.StepIconY) * scale, circle, 64 * scale,
-            Color.white);
-        TMP_Text transmit = CreateValue(panel, "TransmitSecondsText", "20", card + new Vector2(L.StepCircleOffsetX, L.StepIconY) * scale, circle,
-            64 * scale, Color.white);
-        TMP_Text step3 = CreateText(panel, "Step3Text", "전기 생산 50초, 송전 20초!\n전기를 판매하여 랭킹을 획득하세요!",
-            card + new Vector2(0, L.StepBodyY) * scale, L.StepBodySize * scale, 28 * scale, TextColor);
-        Wire(view, ("runSecondsText", run), ("transmitSecondsText", transmit), ("step3Text", step3));
-    }
+        RectTransform panel = CreatePanelRoot("Join");
 
-    private static GameObject CreateWaitNextPanel()
-    {
-        RectTransform panel = CreatePanelRoot("WaitNext");
-        var view = panel.gameObject.AddComponent<WaitNextPanel>();
-        CreateStepTexts(panel, view, 10, 0.9f);
+        Image msgWait = PartImage(panel, "Msg_Wait", "Join_Msg_Wait");
+        Image msgInvite = PartImage(panel, "Msg_Invite", "Join_Msg_Invite");
+        Image msgReady = PartImage(panel, "Msg_Ready", "Join_Msg_Ready");
+        Image subWait = PartImage(panel, "Sub_Wait", "Join_Sub_Wait");
+        Image subInvite = PartImage(panel, "Sub_Invite", "Join_Sub_Invite");
 
-        RectTransform box = Place(CreateRect("Box_Remain", panel), L.WaitRemainPos, L.WaitRemainSize);
-        AddSprite(box, Part("Card_Bg"), new Color(DarkCardColor.r, DarkCardColor.g, DarkCardColor.b, 0.9f));
-        TMP_Text remain = AddText(StretchFull(CreateRect("Text", box)), "약 120초 후 시작", 40, Color.white, true);
-        Wire(view, ("remainText", remain));
+        // 남은 초: 회전하는 원 + 숫자 그림 (두 자리까지)
+        RectTransform counter = StretchFull(CreateRect("Group_Counter", panel));
+        Image ring = PartImage(counter, "Ring", "Join_Ring");
+        Rect digitRect = Psd("Join_Digit");
+        Sprite[] digitSprites = new Sprite[10];
+        for (int d = 0; d < 10; d++) digitSprites[d] = Part($"Join_Digit_{d}");
+        Vector2 cell = digitSprites[0] != null ? digitSprites[0].rect.size : digitRect.size;
+        RectTransform digitRoot = Place(CreateRect("Digits", counter), PsdCenter(digitRect, screen), new Vector2(cell.x * 2f, cell.y));
+        var layout = digitRoot.gameObject.AddComponent<HorizontalLayoutGroup>();
+        layout.childAlignment = TextAnchor.MiddleCenter;
+        layout.childControlWidth = layout.childControlHeight = false;
+        layout.childForceExpandWidth = layout.childForceExpandHeight = false;
+        layout.spacing = -cell.x * 0.15f;
+        var cells = new UnityEngine.Object[2];
+        for (int i = 0; i < 2; i++)
+        {
+            RectTransform c = CreateRect($"Digit_{i + 1}", digitRoot);
+            c.sizeDelta = cell;
+            cells[i] = AddSprite(c, digitSprites[9]);
+        }
+        var digits = digitRoot.gameObject.AddComponent<DigitView>();
+        WireList(digits, "digitSprites", Array.ConvertAll(digitSprites, s => (UnityEngine.Object)s));
+        WireList(digits, "cells", cells);
+
+        Button join = PartButton(panel, "JoinButton", "Join_Button");
+        join.gameObject.SetActive(false);
+
+        Image ready1 = PartImage(panel, "Badge_Ready_1", "Badge_Ready_1");
+        Image wait1 = PartImage(panel, "Badge_Wait_1", "Badge_Wait_1");
+        Image ready2 = PartImage(panel, "Badge_Ready_2", "Badge_Ready_2");
+        Image wait2 = PartImage(panel, "Badge_Wait_2", "Badge_Wait_2");
+        wait1.gameObject.SetActive(false);
+        ready2.gameObject.SetActive(false);
+        msgInvite.gameObject.SetActive(false);
+        msgReady.gameObject.SetActive(false);
+        subInvite.gameObject.SetActive(false);
+
+        var view = panel.gameObject.AddComponent<JoinPanel>();
+        WireList(view, "messages", Objects(msgWait, msgInvite, msgReady));
+        WireList(view, "subMessages", Objects(subWait, subInvite));
+        WireList(view, "readyBadges", Objects(ready1, ready2));
+        WireList(view, "waitBadges", Objects(wait1, wait2));
+        Wire(view, ("counterGroup", counter.gameObject), ("ring", ring.rectTransform), ("digits", digits), ("joinButton", join));
         return panel.gameObject;
     }
 
@@ -320,174 +315,185 @@ public static class PowerPrefabBuilder
     {
         RectTransform panel = CreatePanelRoot("Guide");
         var view = panel.gameObject.AddComponent<GuidePanel>();
-        CreateStepTexts(panel, view, L.StepY, 1f);
-        WireAutoGauge(view, CreateAutoGauge(panel));
-        return panel.gameObject;
-    }
-
-    private static GameObject CreateCharacterSelectPanel()
-    {
-        RectTransform panel = CreatePanelRoot("CharacterSelect");
-
-        var buttons = new List<UnityEngine.Object>();
-        var highlights = new List<UnityEngine.Object>();
-        for (int i = 0; i < L.CharacterX.Length; i++)
-        {
-            Button card = CreateSpriteButton(panel, $"Card_Character_{i + 1}", $"Card_Character_{i + 1}", new Vector2(L.CharacterX[i], L.CharacterY),
-                L.CharacterCardSize);
-            RectTransform highlight = Stretch(CreateRect("Highlight", (RectTransform)card.transform), Vector2.zero, Vector2.one, -12);
-            AddSprite(highlight, Part("Frame_Bg"), AccentColor);
-            highlight.gameObject.SetActive(false);
-            buttons.Add(card);
-            highlights.Add(highlight.gameObject);
-        }
-
-        Image hint = CreateSpriteImage(panel, "Hint_Select", "Hint_Select", L.HintPos, new Vector2(1200, 56));
-        Image waiting = CreateSpriteImage(panel, "Box_Waiting", "Box_Waiting", new Vector2(0, -330), L.WaitingBoxSize);
-        waiting.gameObject.SetActive(false);
-
-        var view = panel.gameObject.AddComponent<CharacterSelectPanel>();
-        WireList(view, "cardButtons", buttons);
-        WireList(view, "highlights", highlights);
-        Wire(view, ("waitingGroup", waiting.gameObject), ("hintGroup", hint.gameObject));
-        WireAutoGauge(view, CreateAutoGauge(panel));
+        CreateAutoGauge(panel, view, "Guide_Gauge");
         return panel.gameObject;
     }
 
     private static GameObject CreateCountdownPanel()
     {
         RectTransform panel = CreatePanelRoot("Countdown");
-        TMP_Text count = CreateValue(panel, "CountText", "3", L.CountCirclePos, Vector2.one * (L.CountCircleSize - 40), 200, AccentColor);
+        var numbers = new UnityEngine.Object[3];
+        for (int i = 0; i < 3; i++)
+        {
+            Image n = PartImage(panel, $"Count_{i + 1}", $"Count_{i + 1}");
+            n.gameObject.SetActive(i == 2);
+            numbers[i] = n.rectTransform;
+        }
+        Image go = PartImage(panel, "Count_Go", "Count_Go");
+        go.gameObject.SetActive(false);
 
         var view = panel.gameObject.AddComponent<CountdownPanel>();
-        Wire(view, ("countText", count));
+        WireList(view, "numbers", numbers);
+        Wire(view, ("go", go.rectTransform));
         return panel.gameObject;
-    }
-
-    // HUD 카드 안 값 (라벨 알약 아래, 단위 왼쪽에서 끝나도록 오른쪽 정렬)
-    private static TMP_Text CreateHudValue(RectTransform panel, string name, string sample, Vector2 card, float pillY, Color color)
-    {
-        return CreateValue(panel, name, sample, card + new Vector2(-35, pillY + L.HudValueOffsetY), new Vector2(200, 84), 66, color,
-            TextAlignmentOptions.MidlineRight);
     }
 
     private static GameObject CreateRunPanel()
     {
         RectTransform panel = CreatePanelRoot("Run");
-        TMP_Text speed = CreateHudValue(panel, "SpeedText", "10.2", L.HudCardCenter, L.RunHudPillY[0], Color.white);
-        TMP_Text watt = CreateHudValue(panel, "WattText", "120", L.HudCardCenter, L.RunHudPillY[1], Color.white);
-        var (ring, remain) = CreateTimer(panel);
 
-        GaugeView energyGauge = CreateGauge(panel, "EnergyGauge", L.BarPos, L.BarFillSize, GreenColor, null);
-        TMP_Text energy = CreateValue(panel, "EnergyText", "12.0 <size=60%>kWh</size>", L.BarPos + new Vector2(560, 0), new Vector2(520, 80), 56,
-            TextColor, TextAlignmentOptions.MidlineRight);
-        TMP_Text scale = CreateText(panel, "ScaleText", "현재 속도로 100시간 동안 달려 생산한 전력량", L.HintPos, new Vector2(1600, 44), 26,
-            Color.white, true);
+        // 속도계: 바늘(가운데 원 포함)을 돌리고 그 위에 숫자
+        Image needle = PartImage(panel, "Needle", "Run_Needle");
+        TMP_Text speed = PsdText(panel, "SpeedText", "Run_SpeedText", "00", 108, WhiteColor, Weight.ExtraBold);
+
+        // 남은 시간: 원형 바가 반시계 방향으로 없어진다
+        Image ring = PartImage(panel, "TimerRing", "Run_TimerRing");
+        ring.type = Image.Type.Filled;
+        ring.fillMethod = Image.FillMethod.Radial360;
+        ring.fillOrigin = (int)Image.Origin360.Top;
+        ring.fillClockwise = true;
+        ring.fillAmount = 0.75f;
+        TMP_Text remain = PsdText(panel, "RemainText", "Run_TimeText", "00", 110, WhiteColor, Weight.ExtraBold);
+
+        // 캐릭터 머리 위를 따라다니므로 아래 끝(말풍선 꼬리)을 피벗으로 둔다
+        Image meL = TagImage(panel, "Tag_L_Me");
+        Image otherL = TagImage(panel, "Tag_L_Other");
+        Image meR = TagImage(panel, "Tag_R_Me");
+        Image otherR = TagImage(panel, "Tag_R_Other");
+        otherL.gameObject.SetActive(false);
+        meR.gameObject.SetActive(false);
+
+        // 상대(혼자면 오늘 1위)와 거리 차: 위쪽 가운데
+        Image compareBox = RoundBox(panel, "Group_Compare", new Vector2(960f, 70f), new Vector2(760f, 76f));
+        TMP_Text compare = AddText(StretchFull(CreateRect("Text", compareBox.rectTransform)), "PLAYER 02보다 <color=#57B588>12m</color> 앞서는 중!", 38,
+            WhiteColor, Weight.SemiBold);
+        compare.enableWordWrapping = false;
+        compareBox.gameObject.SetActive(false);
+
+        Image shine = FilledImage(panel, "BarShine", "Run_BarShine");
+        GaugeView bar = CreateGauge(panel, "EnergyBar", "Run_BarFill", null, shine);
+        shine.transform.SetAsLastSibling();
+        // 숫자는 오른쪽 끝(wh 표시 바로 앞)에 붙는다
+        TMP_Text energy = PsdText(panel, "EnergyText", "Run_BarText", "0.0", 45, WhiteColor, Weight.ExtraBold,
+            HorizontalAlignmentOptions.Right, 360f, true);
 
         var view = panel.gameObject.AddComponent<RunPanel>();
         Wire(view,
             ("speedText", speed),
-            ("wattText", watt),
-            ("energyText", energy),
-            ("energyGauge", energyGauge),
-            ("scaleText", scale),
+            ("needle", needle.rectTransform),
             ("remainText", remain),
-            ("remainRing", ring));
-        return panel.gameObject;
-    }
-
-    private static GameObject CreateRunResultPanel()
-    {
-        RectTransform panel = CreatePanelRoot("RunResult");
-        TMP_Text energy = CreateValue(panel, "EnergyText", "12.0", L.RunResultEnergyPos, new Vector2(440, 160), 130, AccentColor);
-        TMP_Text rank = CreateValue(panel, "RankText", "12<size=50%>위</size>", L.RunResultRankBoxPos + new Vector2(0, -40),
-            new Vector2(360, 160), 120, GreenColor);
-        Button next = CreateSpriteButton(panel, "NextButton", "Button_Transmit", L.TransmitButtonPos, L.TransmitButtonSize);
-
-        var view = panel.gameObject.AddComponent<RunResultPanel>();
-        Wire(view, ("energyText", energy), ("rankText", rank), ("nextButton", next));
-        WireAutoGauge(view, CreateAutoGauge(panel));
+            ("remainRing", ring),
+            ("energyText", energy),
+            ("energyGauge", bar),
+            ("compareGroup", compareBox.gameObject),
+            ("compareText", compare));
+        WireColor(view, ("aheadColor", GreenColor), ("behindColor", OrangeColor), ("evenColor", YellowColor));
+        WireList(view, "meTags", Objects(meL, meR));
+        WireList(view, "otherTags", Objects(otherL, otherR));
         return panel.gameObject;
     }
 
     private static GameObject CreateVoltagePanel()
     {
         RectTransform panel = CreatePanelRoot("Voltage");
-        Button low = CreateSpriteButton(panel, "LowButton", "Button_Low", new Vector2(L.VoltageX[0], L.VoltageY), L.VoltageCardSize);
-        Button high = CreateSpriteButton(panel, "HighButton", "Button_High", new Vector2(L.VoltageX[1], L.VoltageY), L.VoltageCardSize);
-        RectTransform sendBox = Place(CreateRect("Box_Send", panel), L.SendTextPos, new Vector2(560, 76));
-        AddSprite(sendBox, Part("Card_Bg"), new Color(DarkCardColor.r, DarkCardColor.g, DarkCardColor.b, 0.9f));
-        TMP_Text send = AddText(StretchFull(CreateRect("SendText", sendBox)), "보낼 전력  <b>12.0</b> kWh", 34, Color.white, true);
+        // 숫자 칸 왼쪽 끝 = 카드 왼쪽 끝 + 여백 (값이 길어지면 카드 밖으로 나가지 않고 줄어든다)
+        TMP_Text energy = PsdText(panel, "EnergyText", "Voltage_EnergyText", "3.5", 185, OrangeColor, Weight.ExtraBold,
+            HorizontalAlignmentOptions.Right, Psd("Voltage_EnergyText").xMax - Psd("Voltage_Card").xMin - CardPadding, true);
+        TMP_Text rank = PsdText(panel, "RankText", "Voltage_RankText", "35", 185, GreenColor, Weight.ExtraBold,
+            HorizontalAlignmentOptions.Right, 280f, true);
+        Button high = PartButton(panel, "HighButton", "Button_High");
+        Button low = PartButton(panel, "LowButton", "Button_Low");
 
         var view = panel.gameObject.AddComponent<VoltagePanel>();
-        Wire(view, ("lowButton", low), ("highButton", high), ("sendText", send));
-        WireAutoGauge(view, CreateAutoGauge(panel));
+        Wire(view, ("lowButton", low), ("highButton", high), ("energyText", energy), ("rankText", rank));
+        CreateAutoGauge(panel, view, "Voltage_Gauge");
         return panel.gameObject;
     }
 
-    private static GameObject CreateTransmitPanel()
+    private static GameObject CreateSalePanel()
     {
-        RectTransform panel = CreatePanelRoot("Transmit");
+        RectTransform panel = CreatePanelRoot("Sale");
 
-        RectTransform pill = Place(CreateRect("Box_Voltage", panel), new Vector2(0, 400), new Vector2(560, 76));
-        AddSprite(pill, Part("Card_Bg"), new Color(DarkCardColor.r, DarkCardColor.g, DarkCardColor.b, 0.9f));
-        TMP_Text voltage = AddText(StretchFull(CreateRect("Text", pill)), "높은 전압으로 송전 중", 36, Color.white, true);
+        CanvasGroup energyStep = Group(panel, "Step_1_Energy");
+        PartImage((RectTransform)energyStep.transform, "Card", "Sale_Energy");
+        TMP_Text energy = PsdText((RectTransform)energyStep.transform, "EnergyText", "Sale_EnergyText", "0.0", 185, OrangeColor,
+            Weight.ExtraBold, HorizontalAlignmentOptions.Right, Psd("Sale_EnergyText").xMax - Psd("Sale_Energy").xMin - CardPadding, true);
 
-        TMP_Text sent = CreateHudValue(panel, "SentText", "12.0", L.TransmitHudCenter, L.TransmitHudPillY[0], Color.white);
-        TMP_Text loss = CreateHudValue(panel, "LossText", "-0.6", L.TransmitHudCenter, L.TransmitHudPillY[1], YellowColor);
-        TMP_Text arrived = CreateHudValue(panel, "ArrivedText", "11.4", L.TransmitHudCenter, L.TransmitHudPillY[2], AccentColor);
-        var (ring, remain) = CreateTimer(panel);
+        CanvasGroup arrow1 = Group(panel, "Step_2_Arrow");
+        PartImage((RectTransform)arrow1.transform, "Arrow", "Sale_Arrow_1");
 
-        GaugeView arrivedGauge = CreateGauge(panel, "ArrivedGauge", L.BarPos, L.BarFillSize, AccentColor, null);
-        TMP_Text arrivedBar = CreateValue(panel, "ArrivedBarText", "11.4 <size=60%>kWh</size>", L.BarPos + new Vector2(-560, 0), new Vector2(480, 80),
-            52, Color.white, TextAlignmentOptions.MidlineLeft);
-        TMP_Text sentBar = CreateValue(panel, "SentBarText", "누적 환산 발전량 <b>12.0</b> kWh", L.BarPos + new Vector2(540, 0), new Vector2(560, 60), 30,
-            TextColor, TextAlignmentOptions.MidlineRight);
+        CanvasGroup voltageStep = Group(panel, "Step_3_Voltage");
+        Image low = PartImage((RectTransform)voltageStep.transform, "Card_Low", "Sale_Low");
+        Image high = PartImage((RectTransform)voltageStep.transform, "Card_High", "Sale_High");
+        low.gameObject.SetActive(false);
 
-        var view = panel.gameObject.AddComponent<TransmitPanel>();
-        Wire(view,
-            ("voltageText", voltage),
-            ("sentText", sent),
-            ("lossText", loss),
-            ("arrivedText", arrived),
-            ("arrivedGauge", arrivedGauge),
-            ("arrivedBarText", arrivedBar),
-            ("sentBarText", sentBar),
-            ("remainText", remain),
-            ("remainRing", ring));
+        CanvasGroup arrow2 = Group(panel, "Step_4_Arrow");
+        PartImage((RectTransform)arrow2.transform, "Arrow", "Sale_Arrow_2");
+
+        CanvasGroup moneyStep = Group(panel, "Step_5_Money");
+        PartImage((RectTransform)moneyStep.transform, "Card", "Sale_Money");
+        TMP_Text money = PsdText((RectTransform)moneyStep.transform, "MoneyText", "Sale_MoneyText", "0,000", 160, WhiteColor,
+            Weight.ExtraBold, HorizontalAlignmentOptions.Center, 420f);
+
+        var view = panel.gameObject.AddComponent<SalePanel>();
+        WireList(view, "steps", new UnityEngine.Object[] { energyStep, arrow1, voltageStep, arrow2, moneyStep });
+        WireList(view, "voltageCards", Objects(low, high));
+        Wire(view, ("energyText", energy), ("moneyText", money));
+        CreateAutoGauge(panel, view, "Sale_Gauge");
         return panel.gameObject;
     }
 
-    private static GameObject CreateResultPanel()
+    // 랭킹 표 한쪽: 1~5위 줄의 기록 시각(왼쪽 정렬)과 값(오른쪽 정렬), 나의 순위 줄
+    // 값은 오른쪽의 단위 그림(wh, ₩)과 기준선을 맞춘다. 기준선은 발전왕 값 샘플(쉼표 없는 숫자)의 잉크 아래 끝에서 줄 간격씩 올라간다.
+    private static RankTableView CreateRankTable(RectTransform panel, string name, string prefix, string baselinePrefix, float rowPitch,
+        float timeSize, float valueSize, bool myRow)
     {
-        RectTransform panel = CreatePanelRoot("Result");
+        RectTransform root = StretchFull(CreateRect(name, panel));
+        Rect times = Psd($"{prefix}_Times");
+        Rect values = Psd($"{prefix}_Values");
+        float lastBaseline = Psd($"{baselinePrefix}_Values").yMax;
+        float timeInk = timeSize * 0.85f;
+        float firstY = times.yMin + timeInk * 0.5f;
 
-        string[] names = { "MaxSpeedText", "EnergyText", "LossText", "ArrivedText" };
-        string[] samples = { "11.2", "12.0", "-0.6", "11.4" };
-        Color[] colors = { BlueColor, GreenColor, YellowColor, AccentColor };
-        var values = new TMP_Text[names.Length];
-        for (int i = 0; i < names.Length; i++)
-            values[i] = CreateValue(panel, names[i], samples[i], new Vector2(L.ResultValueX, L.ResultRowY[i]), L.ResultValueSize, 60, colors[i],
-                TextAlignmentOptions.MidlineRight);
-        TMP_Text sale = CreateValue(panel, "SaleText", "1,710", new Vector2(L.ResultValueX - 35, L.ResultSaleY), new Vector2(300, 90), 76, TextColor,
-            TextAlignmentOptions.MidlineRight);
-        TMP_Text price = CreateText(panel, "PriceText", "기준단가 150원/kWh | 변전 설비 비용 300원 차감 (가상 조건)", L.PricePos, new Vector2(1600, 36), 22,
-            SubTextColor);
+        var timeTexts = new UnityEngine.Object[5];
+        var valueTexts = new UnityEngine.Object[5];
+        for (int i = 0; i < 5; i++)
+        {
+            float y = firstY + rowPitch * i;
+            timeTexts[i] = ValueText(root, $"Row{i + 1}_Time", "26.10.22 1:22:43", new Vector2(times.xMin + 200f, y),
+                new Vector2(400f, timeSize * 1.4f), timeSize, TextColor, Weight.SemiBold, HorizontalAlignmentOptions.Left);
+            TMP_Text value = ValueText(root, $"Row{i + 1}_Value", "4.5", new Vector2(values.xMax - 150f, lastBaseline - rowPitch * (4 - i)),
+                new Vector2(300f, valueSize * 1.4f), valueSize, TextColor, Weight.ExtraBold, HorizontalAlignmentOptions.Right);
+            value.verticalAlignment = VerticalAlignmentOptions.Baseline;
+            valueTexts[i] = value;
+        }
 
-        RectTransform list = CreateRankList(panel, L.ResultListPos, L.ResultListSize, out GameObject gap);
+        var view = root.gameObject.AddComponent<RankTableView>();
+        WireList(view, "timeTexts", timeTexts);
+        WireList(view, "valueTexts", valueTexts);
+        if (myRow)
+        {
+            TMP_Text rank = PsdText(root, "My_Rank", $"{prefix}_MyRank", "35", 23, WhiteColor, Weight.Bold, HorizontalAlignmentOptions.Center, 60f);
+            TMP_Text time = PsdText(root, "My_Time", $"{prefix}_MyTime", "26.10.22 1:22:43", timeSize, WhiteColor, Weight.SemiBold,
+                HorizontalAlignmentOptions.Left, 400f);
+            Rect myValue = Psd($"{prefix}_MyValue");
+            TMP_Text value = ValueText(root, "My_Value", "3.5", new Vector2(myValue.xMax - 150f, Psd($"{baselinePrefix}_MyValue").yMax),
+                new Vector2(300f, valueSize * 1.4f), valueSize, WhiteColor, Weight.ExtraBold, HorizontalAlignmentOptions.Right);
+            value.verticalAlignment = VerticalAlignmentOptions.Baseline;
+            Wire(view, ("myRankText", rank), ("myTimeText", time), ("myValueText", value));
+        }
+        return view;
+    }
 
-        var view = panel.gameObject.AddComponent<ResultPanel>();
-        Wire(view,
-            ("maxSpeedText", values[0]),
-            ("energyText", values[1]),
-            ("lossText", values[2]),
-            ("arrivedText", values[3]),
-            ("saleText", sale),
-            ("priceText", price),
-            ("rowPrefab", rankRowPrefab.GetComponent<RankRowView>()),
-            ("rowRoot", list),
-            ("gapMark", gap));
-        WireAutoGauge(view, CreateAutoGauge(panel));
+    private static GameObject CreateRankingPanel()
+    {
+        RectTransform panel = CreatePanelRoot("Ranking");
+        RankTableView energy = CreateRankTable(panel, "Table_Energy", "Rank_E", "Rank_E", 80.5f, 22.4f, 38f, true);
+        RankTableView sale = CreateRankTable(panel, "Table_Sale", "Rank_S", "Rank_E", 80.5f, 22.4f, 38f, true);
+
+        var view = panel.gameObject.AddComponent<RankingPanel>();
+        Wire(view, ("energyTable", energy), ("saleTable", sale));
+        CreateAutoGauge(panel, view, "Ranking_Gauge");
         return panel.gameObject;
     }
 
@@ -498,66 +504,34 @@ public static class PowerPrefabBuilder
     private static GameObject CreateSpectatorPanel()
     {
         RectTransform panel = StretchFull(CreateRect($"Panel_{SpectatorName}", null));
-        Image staticLayer = AddSprite(StretchFull(CreateRect(StaticLayerName, panel)), LoadSprite(StaticSpritePath(SpectatorName)));
-        staticLayer.type = Image.Type.Simple;
+        AddSprite(StretchFull(CreateRect(StaticLayerName, panel)), LoadSprite(StaticSpritePath(SpectatorName)));
 
-        for (int p = 0; p < 2; p++)
+        for (int p = 1; p <= 2; p++)
         {
-            Vector2 c = L.PaneCenter[p];
-            // 3D 카메라가 그리는 자리 (RaceCamera viewport). 비어 있는 RectTransform.
-            RectTransform pane = Place(CreateRect($"Pane_{p + 1}", panel), c, L.PaneSize);
-
-            Image idle = AddSprite(StretchFull(CreateRect("Group_Idle", pane)), Part("Spectator_Idle"));
-            idle.type = Image.Type.Simple;
-
-            RectTransform badge = Place(CreateRect("Badge", pane), L.BadgeOffset, L.BadgeSize);
-            AddSprite(badge, Part("Card_Bg"), Color.white);
-            TMP_Text badgeText = AddText(StretchFull(CreateRect("Text", badge)), "체험 중...", 26, AccentColor, true);
-
-            RectTransform compare = Place(CreateRect("Compare", pane), L.CompareOffset, L.CompareSize);
-            AddSprite(compare, Part("Card_Bg"), new Color(DarkCardColor.r, DarkCardColor.g, DarkCardColor.b, 0.85f));
-            TMP_Text compareText = AddText(StretchFull(CreateRect("Text", compare)), "오늘 1위보다 12m 앞서는 중", 28, Color.white, true);
-            compareText.enableWordWrapping = false;
-
-            var values = new TMP_Text[3];
-            string[] samples = { "10.2 <size=55%>km/h</size>", "120 <size=55%>W</size>", "12.0 <size=55%>kWh</size>" };
-            Color[] colors = { new Color32(120, 180, 255, 255), new Color32(110, 220, 160, 255), new Color32(255, 140, 110, 255) };
-            for (int i = 0; i < 3; i++)
-                values[i] = CreateValue(panel, $"Pane{p + 1}_Value_{i + 1}", samples[i],
-                    c + new Vector2(L.StripColumnX[i], L.StripOffsetY + L.StripValueOffsetY), new Vector2(300, 46), 34, colors[i]);
-
-            var view = pane.gameObject.AddComponent<SpectatorPaneView>();
-            Wire(view, ("badgeText", badgeText), ("maxSpeedText", values[0]), ("wattText", values[1]), ("energyText", values[2]),
-                ("compareText", compareText), ("compareGroup", compare.gameObject), ("idleGroup", idle.gameObject));
+            PsdText(panel, $"Status_{p}", $"Spec_Badge_{p}", "체험 대기중", 43, TextColor, Weight.SemiBold,
+                HorizontalAlignmentOptions.Center, 230f);
+            // PLAYER 01 은 wh 표시 오른쪽에서 시작(왼쪽 정렬), PLAYER 02 는 wh 표시 왼쪽에서 끝(오른쪽 정렬)
+            PsdText(panel, $"Energy_{p}", $"Spec_Value_{p}", "0.0", 185, OrangeColor, Weight.ExtraBold,
+                p == 1 ? HorizontalAlignmentOptions.Left : HorizontalAlignmentOptions.Right, 640f, true);
         }
 
-        // 랭킹 표
-        RectTransform list = Place(CreateRect("RankList", panel), L.SpectatorRankPos, L.SpectatorRankSize);
-        var layout = list.gameObject.AddComponent<VerticalLayoutGroup>();
-        layout.spacing = 6;
-        layout.childAlignment = TextAnchor.UpperCenter;
-        layout.childControlWidth = true;
-        layout.childControlHeight = true;
-        layout.childForceExpandWidth = true;
-        layout.childForceExpandHeight = false;
+        Image tag = PartImage(panel, "RecordTag", "Spectator_RecordTag");
+        tag.gameObject.SetActive(false);
 
-        // 새 랭킹 팝업
-        RectTransform popup = Place(CreateRect("Group_Popup", panel), L.PopupPos, L.PopupSize);
-        AddSprite(popup, Part("Popup_Ranking")).type = Image.Type.Simple;
-        TMP_Text player = CreateValue(popup, "PlayerText", "Player 02", new Vector2(0, 228), new Vector2(200, 50), 28, Color.white);
-        TMP_Text rank = CreateValue(popup, "RankText", "3", new Vector2(0, 110), new Vector2(240, 190), 170, TextColor);
-        Vector2 box = new Vector2(0, -170);
-        Vector2[] pills = { new Vector2(-240, 125), new Vector2(90, 125), new Vector2(-240, 45), new Vector2(90, 45) };
-        Color[] colors2 = { new Color32(120, 180, 255, 255), new Color32(110, 220, 160, 255), YellowColor, new Color32(255, 140, 110, 255) };
-        string[] names = { "SpeedText", "EnergyText", "LossText", "ArrivedText" };
-        var popupValues = new TMP_Text[4];
-        for (int i = 0; i < 4; i++)
-            popupValues[i] = CreateValue(popup, names[i], "11.2", box + pills[i] + new Vector2(150, 0), new Vector2(150, 60), 44, colors2[i],
-                TextAlignmentOptions.MidlineLeft);
-        TMP_Text sale = CreateValue(popup, "SaleText", "3,100", box + new Vector2(0, -100), new Vector2(600, 110), 96, Color.white);
-        popup.gameObject.SetActive(false);
+        // 아래 칸 3개 (같은 자리에 겹쳐 두고 번갈아 보여 준다)
+        CanvasGroup ranking = Group(panel, "Bottom_1_Ranking");
+        PartImage((RectTransform)ranking.transform, "Board", "Spectator_Ranking");
+        CreateRankTable((RectTransform)ranking.transform, "Table_Energy", "Spec_E", "Spec_E", 116.5f, 32f, 54.5f, false);
+        CreateRankTable((RectTransform)ranking.transform, "Table_Sale", "Spec_S", "Spec_E", 116.5f, 32f, 54.5f, false);
 
-        // 링크 정보만 담는 빈 컴포넌트는 두지 않는다. SpectatorScreen(캔버스 루트)이 아래 이름으로 연결한다.
+        CanvasGroup info1 = Group(panel, "Bottom_2_Info");
+        PartImage((RectTransform)info1.transform, "Board", "Spectator_Info_1");
+        info1.alpha = 0f;
+        CanvasGroup info2 = Group(panel, "Bottom_3_Info");
+        PartImage((RectTransform)info2.transform, "Board", "Spectator_Info_2");
+        info2.alpha = 0f;
+
+        // SpectatorScreen(캔버스 루트)이 위 이름으로 연결한다
         return panel.gameObject;
     }
 
@@ -578,21 +552,22 @@ public static class PowerPrefabBuilder
 
         RectTransform frame = Place(CreateRect("Frame", go.transform), Vector2.zero, SpectatorResolution);
         var panel = (GameObject)PrefabUtility.InstantiatePrefab(panelPrefab, frame);
-        Transform popup = panel.transform.Find("Group_Popup");
+        Transform t = panel.transform;
+        T Find<T>(string path) where T : Component => t.Find(path).GetComponent<T>();
 
-        var screen = go.AddComponent<SpectatorScreen>();
-        Wire(screen,
+        var screenView = go.AddComponent<SpectatorScreen>();
+        Wire(screenView,
             ("canvas", canvas),
-            ("rowPrefab", rankRowPrefab.GetComponent<RankRowView>()),
-            ("rowRoot", panel.transform.Find("RankList")),
-            ("popup", popup.gameObject),
-            ("popupPlayerText", popup.Find("PlayerText").GetComponent<TMP_Text>()),
-            ("popupRankText", popup.Find("RankText").GetComponent<TMP_Text>()),
-            ("popupSpeedText", popup.Find("SpeedText").GetComponent<TMP_Text>()),
-            ("popupEnergyText", popup.Find("EnergyText").GetComponent<TMP_Text>()),
-            ("popupLossText", popup.Find("LossText").GetComponent<TMP_Text>()),
-            ("popupArrivedText", popup.Find("ArrivedText").GetComponent<TMP_Text>()),
-            ("popupSaleText", popup.Find("SaleText").GetComponent<TMP_Text>()));
+            ("recordTag", Find<RectTransform>("RecordTag")),
+            ("energyTable", Find<RankTableView>("Bottom_1_Ranking/Table_Energy")),
+            ("saleTable", Find<RankTableView>("Bottom_1_Ranking/Table_Sale")));
+        WireList(screenView, "statusTexts", new UnityEngine.Object[] { Find<TMP_Text>("Status_1"), Find<TMP_Text>("Status_2") });
+        WireList(screenView, "energyTexts", new UnityEngine.Object[] { Find<TMP_Text>("Energy_1"), Find<TMP_Text>("Energy_2") });
+        WireList(screenView, "bottomGroups", new UnityEngine.Object[]
+        {
+            Find<CanvasGroup>("Bottom_1_Ranking"), Find<CanvasGroup>("Bottom_2_Info"), Find<CanvasGroup>("Bottom_3_Info"),
+        });
+        WireList(screenView, "infoImages", new UnityEngine.Object[] { Find<Image>("Bottom_2_Info/Board"), Find<Image>("Bottom_3_Info/Board") });
         return go;
     }
 
@@ -629,19 +604,17 @@ public static class PowerPrefabBuilder
             instances.Add(panel);
         }
 
-        var screen = go.AddComponent<WheelScreen>();
-        Wire(screen,
+        var screenView = go.AddComponent<WheelScreen>();
+        Wire(screenView,
             ("canvas", canvas),
             ("idlePanel", instances[0].GetComponent<IdlePanel>()),
-            ("waitNextPanel", instances[1].GetComponent<WaitNextPanel>()),
+            ("joinPanel", instances[1].GetComponent<JoinPanel>()),
             ("guidePanel", instances[2].GetComponent<GuidePanel>()),
-            ("characterSelectPanel", instances[3].GetComponent<CharacterSelectPanel>()),
-            ("countdownPanel", instances[4].GetComponent<CountdownPanel>()),
-            ("runPanel", instances[5].GetComponent<RunPanel>()),
-            ("runResultPanel", instances[6].GetComponent<RunResultPanel>()),
-            ("voltagePanel", instances[7].GetComponent<VoltagePanel>()),
-            ("transmitPanel", instances[8].GetComponent<TransmitPanel>()),
-            ("resultPanel", instances[9].GetComponent<ResultPanel>()));
+            ("countdownPanel", instances[3].GetComponent<CountdownPanel>()),
+            ("runPanel", instances[4].GetComponent<RunPanel>()),
+            ("voltagePanel", instances[5].GetComponent<VoltagePanel>()),
+            ("salePanel", instances[6].GetComponent<SalePanel>()),
+            ("rankingPanel", instances[7].GetComponent<RankingPanel>()));
         return go;
     }
 
@@ -678,7 +651,9 @@ public static class PowerPrefabBuilder
                 Undo.RegisterCreatedObjectUndo(canvas, "Create Wheel Canvas");
             }
 
-            Wire(canvas.GetComponent<WheelScreen>(), ("session", session));
+            Camera cam = FindRoot($"Camera_Wheel_{session.WheelId}")?.GetComponent<Camera>();
+            if (cam == null) Debug.LogWarning($"Camera_Wheel_{session.WheelId} 이 없습니다. '5. 3D 경주 장면 만들기'를 먼저 실행하세요.");
+            Wire(canvas.GetComponent<WheelScreen>(), ("session", session), ("raceCamera", cam));
             last = canvas;
         }
 
@@ -703,10 +678,10 @@ public static class PowerPrefabBuilder
         }
 
         WheelSession[] sessions = SortedSessions();
-        WireList(canvas.GetComponent<SpectatorScreen>(), "sessions", Array.ConvertAll(sessions, s => (UnityEngine.Object)s));
-        var panes = canvas.GetComponentsInChildren<SpectatorPaneView>(true);
-        for (int i = 0; i < panes.Length && i < sessions.Length; i++)
-            Wire(panes[i], ("session", sessions[i]));
+        var view = canvas.GetComponent<SpectatorScreen>();
+        WireList(view, "sessions", Array.ConvertAll(sessions, s => (UnityEngine.Object)s));
+        foreach (var cam in UnityEngine.Object.FindObjectsOfType<RaceCamera>(true))
+            if (cam.Screen == RaceCamera.Target.Spectator) Wire(view, ("raceCamera", cam.GetComponent<Camera>()));
         EditorSceneManager.MarkSceneDirty(SceneManager.GetActiveScene());
     }
 

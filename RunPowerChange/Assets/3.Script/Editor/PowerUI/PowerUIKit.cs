@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.IO;
 using TMPro;
@@ -5,7 +6,7 @@ using UnityEditor;
 using UnityEngine;
 using UnityEngine.UI;
 
-// 달려라! 전력 챌린지 UI 에디터 도구들이 같이 쓰는 경로, 색, 생성 헬퍼.
+// 달려라! 전력 챌린지 UI 에디터 도구들이 같이 쓰는 경로, 색, 글꼴, PSD 좌표, 생성 헬퍼.
 public static class PowerUIKit
 {
     #region 경로
@@ -14,6 +15,8 @@ public static class PowerUIKit
     public const string StaticDir = SpriteRoot + "/Static";
     public const string PartsDir = SpriteRoot + "/Parts";
     public const string GuideDir = SpriteRoot + "/_Guide";
+    // Tools/psd_export.py 가 디자이너 PSD 에서 뽑은 부품·글자 자리 좌표
+    public const string LayoutPath = SpriteRoot + "/_Layout/psd_layout.json";
 
     public const string PrefabRoot = "Assets/2.Model/Prefabs/RunPowerChange";
     public const string PartPrefabDir = PrefabRoot + "/Parts";
@@ -26,83 +29,119 @@ public static class PowerUIKit
 
     public const string StaticLayerName = "StaticLayer";
 
-    private const string BoldFontPath = "Assets/10.Font/defaultFont/NotoSansKR-Bold SDF.asset";
-    private const string MediumFontPath = "Assets/10.Font/defaultFont/NotoSansKR-Medium SDF.asset";
+    private const string FontDir = "Assets/10.Font/Paperlogy";
 
-    // 32형 패널 이름 (Panel_xxx 프리팹, Static_xxx 이미지, Guide_xxx 이미지에 같이 쓰인다)
+    // 32형 패널 이름 (Panel_xxx 프리팹, Static_xxx 이미지, Guide_xxx 이미지에 같이 쓰인다). WheelSession.State 순서.
     public static readonly string[] PanelNames =
-        { "Idle", "WaitNext", "Guide", "CharacterSelect", "Countdown", "Run", "RunResult", "Voltage", "Transmit", "Result" };
+        { "Idle", "Join", "Guide", "Countdown", "Run", "Voltage", "Sale", "Ranking" };
 
     public static string StaticSpritePath(string panel) => $"{StaticDir}/Static_{panel}.png";
     public static string GuidePath(string panel) => $"{GuideDir}/Guide_{panel}.png";
     public static string PanelPrefabPath(string panel) => $"{PanelPrefabDir}/Panel_{panel}.prefab";
     public static string PartSpritePath(string name) => $"{PartsDir}/{name}.png";
-    public static string PartPrefabPath(string name) => $"{PartPrefabDir}/{name}.prefab";
 
     #endregion
 
     #region 화면 규격과 색
 
-    // 32형 터치모니터 (쳇바퀴 내부, 가로)
+    // 32형 터치모니터 (쳇바퀴 내부, 가로) = 디자인 PSD 크기
     public const int ScreenWidth = 1920;
     public const int ScreenHeight = 1080;
     public static readonly Vector2 ReferenceResolution = new Vector2(ScreenWidth, ScreenHeight);
 
-    // 85형 관전 화면 (세로). 2160x3840 모니터도 같은 비율이라 Expand 로 그대로 커진다.
-    public const int SpectatorWidth = 1080;
-    public const int SpectatorHeight = 1920;
+    // 85형 관전 화면 (세로) = 디자인 PSD 크기. 1080x1920 모니터도 같은 비율이라 Expand 로 그대로 줄어든다.
+    public const int SpectatorWidth = 2160;
+    public const int SpectatorHeight = 3840;
     public static readonly Vector2 SpectatorResolution = new Vector2(SpectatorWidth, SpectatorHeight);
 
-    // 디자인 시안 색. 32형은 3D 장면 위에 반투명 흰 카드, 85형은 밝은 회색 바탕.
-    public static readonly Color BgColor = new Color32(236, 236, 241, 255);
-    public static readonly Color CardColor = new Color32(255, 255, 255, 228);
-    public static readonly Color DarkCardColor = new Color32(46, 49, 84, 255);
-    public static readonly Color SoftBoxColor = new Color32(255, 255, 255, 60);
-    // 주황 강조 (버튼, 선택, 남은 시간). 리치 텍스트 강조는 AccentHex 와 같은 값을 쓴다.
-    public static readonly Color AccentColor = new Color32(242, 106, 61, 255);
-    public const string AccentHex = "#F26A3D";
-    public static readonly Color GreenColor = new Color32(45, 179, 111, 255);
-    public static readonly Color BlueColor = new Color32(58, 134, 214, 255);
-    public static readonly Color YellowColor = new Color32(242, 168, 29, 255);
-    // 카드 위 글자 (남색), 3D 장면 위 제목 글자 (흰색)
-    public static readonly Color TextColor = new Color32(46, 49, 84, 255);
-    public static readonly Color TitleColor = Color.white;
-    public static readonly Color SubTextColor = new Color32(107, 112, 136, 255);
-    public static readonly Color DarkTextColor = new Color32(46, 49, 84, 255);
+    // 디자인 PSD 글자 색
+    public static readonly Color TextColor = new Color32(52, 55, 90, 255);       // 남색 (카드·표 위 글자)
+    public static readonly Color OrangeColor = new Color32(250, 114, 85, 255);   // 발전량 숫자
+    public static readonly Color GreenColor = new Color32(87, 181, 136, 255);    // 순위 숫자
+    public static readonly Color YellowColor = new Color32(251, 176, 59, 255);   // 문구 강조
+    public const string YellowHex = "#FBB03B";
+    public static readonly Color WhiteColor = Color.white;
     public static readonly Color ShadowColor = new Color(0f, 0f, 0f, 0.45f);
 
-    // 게이지와 랭킹 줄 (흰 스프라이트에 프리팹이 칠하는 색)
-    public static readonly Color GaugeTrackColor = new Color(1f, 1f, 1f, 0.92f);
-    public static readonly Color LossColor = YellowColor;
-    public static readonly Color RankRowColor = new Color(1f, 1f, 1f, 0.75f);
+    #endregion
+
+    #region 글꼴
+
+    // 디자인 글꼴: 문구 Paperlogy, 숫자 HG꼬딕씨(설치본 없음 → Paperlogy ExtraBold 로 대신함)
+    public enum Weight { Medium, SemiBold, Bold, ExtraBold }
+
+    private static readonly Dictionary<Weight, TMP_FontAsset> fonts = new Dictionary<Weight, TMP_FontAsset>();
+
+    public static TMP_FontAsset Font(Weight weight)
+    {
+        if (fonts.TryGetValue(weight, out TMP_FontAsset font) && font != null) return font;
+        string file = weight switch
+        {
+            Weight.Medium => "Paperlogy-5Medium SDF.asset",
+            Weight.SemiBold => "Paperlogy-6SemiBold SDF.asset",
+            Weight.Bold => "Paperlogy-7Bold SDF.asset",
+            _ => "Paperlogy-8ExtraBold SDF.asset",
+        };
+        font = AssetDatabase.LoadAssetAtPath<TMP_FontAsset>($"{FontDir}/{file}");
+        if (font == null)
+        {
+            Debug.LogWarning($"폰트를 찾지 못해 TMP 기본 폰트를 사용합니다: {FontDir}/{file}");
+            font = TMP_Settings.defaultFontAsset;
+        }
+        fonts[weight] = font;
+        return font;
+    }
+
+    #endregion
+
+    #region PSD 좌표
+
+    [Serializable]
+    private class LayoutRect
+    {
+        public string name;
+        public float x, y, w, h;
+    }
+
+    [Serializable]
+    private class LayoutFile
+    {
+        public int wheelWidth, wheelHeight, spectatorWidth, spectatorHeight;
+        public List<LayoutRect> rects = new List<LayoutRect>();
+    }
+
+    private static Dictionary<string, Rect> layout;
+
+    public static void ReloadLayout() => layout = null;
+
+    // PSD 픽셀 사각형 (왼쪽 위 원점)
+    public static Rect Psd(string name)
+    {
+        if (layout == null)
+        {
+            layout = new Dictionary<string, Rect>();
+            if (!File.Exists(LayoutPath))
+            {
+                Debug.LogError($"PSD 좌표 파일이 없습니다: {LayoutPath} (Tools/psd_export.py 를 먼저 실행하세요)");
+            }
+            else
+            {
+                var file = JsonUtility.FromJson<LayoutFile>(File.ReadAllText(LayoutPath));
+                foreach (var r in file.rects) layout[r.name] = new Rect(r.x, r.y, r.w, r.h);
+            }
+        }
+        if (layout.TryGetValue(name, out Rect rect)) return rect;
+        Debug.LogError($"PSD 좌표에 '{name}' 이 없습니다 ({LayoutPath})");
+        return new Rect(0, 0, 100, 100);
+    }
+
+    // PSD 픽셀 좌표(왼쪽 위 원점) → 캔버스 가운데 원점 좌표
+    public static Vector2 PsdPoint(Vector2 psd, Vector2 screen) => new Vector2(psd.x - screen.x * 0.5f, screen.y * 0.5f - psd.y);
+    public static Vector2 PsdCenter(Rect r, Vector2 screen) => PsdPoint(r.center, screen);
 
     #endregion
 
     #region 리소스
-
-    private static TMP_FontAsset boldFont;
-    private static TMP_FontAsset mediumFont;
-    private static Sprite builtinRound;
-
-    private static Sprite roundSprite;
-    public static Sprite RoundSprite => roundSprite != null ? roundSprite : roundSprite = AssetDatabase.LoadAssetAtPath<Sprite>($"{PartsDir}/Card_Bg.png");
-
-    public static TMP_FontAsset BoldFont => boldFont != null ? boldFont : boldFont = LoadFont(BoldFontPath);
-    public static TMP_FontAsset MediumFont => mediumFont != null ? mediumFont : mediumFont = LoadFont(MediumFontPath);
-
-    // 정적 레이어 렌더링용 둥근 박스 (유니티 기본 UISprite)
-    public static Sprite BuiltinRound => builtinRound != null
-        ? builtinRound
-        : builtinRound = AssetDatabase.GetBuiltinExtraResource<Sprite>("UI/Skin/UISprite.psd");
-
-    private static TMP_FontAsset LoadFont(string path)
-    {
-        var font = AssetDatabase.LoadAssetAtPath<TMP_FontAsset>(path);
-        if (font != null) return font;
-
-        Debug.LogWarning($"폰트를 찾지 못해 TMP 기본 폰트를 사용합니다: {path}");
-        return TMP_Settings.defaultFontAsset;
-    }
 
     public static Sprite LoadSprite(string path)
     {
@@ -164,45 +203,19 @@ public static class PowerUIKit
         return image;
     }
 
-    // 스프라이트 이미지. 9-slice 테두리가 있으면 Sliced로 늘린다.
     public static Image AddSprite(RectTransform rt, Sprite sprite, Color? tint = null)
     {
         Image image = AddImage(rt, tint ?? Color.white);
         image.sprite = sprite;
-        image.type = sprite != null && sprite.border != Vector4.zero ? Image.Type.Sliced : Image.Type.Simple;
+        image.type = Image.Type.Simple;
         return image;
     }
 
-    // 정적 레이어 렌더링용 둥근 박스 (기본 UISprite의 둥글기를 화면 규격에 맞게 키움)
-    // 정적 레이어 렌더링용 둥근 박스. 부품 Card_Bg(흰 둥근 사각, 9-slice)를 radius 에 맞게 늘려 쓴다.
-    // 반지름이 상자 절반보다 크면 Unity 가 모서리를 줄여 원·알약 모양이 된다.
-    public static Image AddRoundBox(RectTransform rt, Color color, float radius = 24f)
-    {
-        Image image = AddImage(rt, color);
-        Sprite round = RoundSprite;
-        image.sprite = round != null ? round : BuiltinRound;
-        image.type = Image.Type.Sliced;
-        float spriteRadius = round != null ? round.border.x : 3f;
-        image.pixelsPerUnitMultiplier = spriteRadius / Mathf.Max(1f, radius);
-        return image;
-    }
-
-    public static RectTransform CreateRoundBox(RectTransform parent, string name, Vector2 pos, Vector2 size, Color color, float radius = 24f)
-    {
-        RectTransform box = Place(CreateRect(name, parent), pos, size);
-        AddRoundBox(box, color, radius);
-        return box;
-    }
-
-    // 양 끝이 반원인 알약 모양 상자
-    public static RectTransform CreatePill(RectTransform parent, string name, Vector2 pos, Vector2 size, Color color)
-        => CreateRoundBox(parent, name, pos, size, color, size.y * 0.5f);
-
-    public static TextMeshProUGUI AddText(RectTransform rt, string text, float fontSize, Color color, bool bold = false,
+    public static TextMeshProUGUI AddText(RectTransform rt, string text, float fontSize, Color color, Weight weight = Weight.SemiBold,
         TextAlignmentOptions alignment = TextAlignmentOptions.Center)
     {
         var tmp = rt.gameObject.AddComponent<TextMeshProUGUI>();
-        tmp.font = bold ? BoldFont : MediumFont;
+        tmp.font = Font(weight);
         tmp.text = text;
         tmp.fontSize = fontSize;
         tmp.color = color;
@@ -212,31 +225,17 @@ public static class PowerUIKit
         return tmp;
     }
 
-    // 3D 장면 위 제목: 그림자 글자를 아래에 한 번 더 그린다 (정적 레이어 렌더링용)
-    public static TextMeshProUGUI ShadowText(RectTransform parent, string name, string text, Vector2 pos, Vector2 size,
-        float fontSize, Color color, bool bold = true, TextAlignmentOptions alignment = TextAlignmentOptions.Center)
-    {
-        CreateText(parent, name + "_Shadow", text, pos + new Vector2(2f, -3f), size, fontSize, ShadowColor, bold, alignment);
-        return CreateText(parent, name, text, pos, size, fontSize, color, bold, alignment);
-    }
-
     public static TextMeshProUGUI CreateText(RectTransform parent, string name, string text, Vector2 pos, Vector2 size,
-        float fontSize, Color color, bool bold = false, TextAlignmentOptions alignment = TextAlignmentOptions.Center)
+        float fontSize, Color color, Weight weight = Weight.SemiBold, TextAlignmentOptions alignment = TextAlignmentOptions.Center)
     {
-        return AddText(Place(CreateRect(name, parent), pos, size), text, fontSize, color, bold, alignment);
-    }
-
-    // 부모 영역을 가득 채우는 텍스트
-    public static TextMeshProUGUI FillText(RectTransform parent, string name, string text, float fontSize, Color color, bool bold = false)
-    {
-        return AddText(Stretch(CreateRect(name, parent), Vector2.zero, Vector2.one, 10), text, fontSize, color, bold);
+        return AddText(Place(CreateRect(name, parent), pos, size), text, fontSize, color, weight, alignment);
     }
 
     #endregion
 
     #region 인스펙터 연결
 
-    public static void Wire(Object target, params (string field, Object value)[] pairs)
+    public static void Wire(UnityEngine.Object target, params (string field, UnityEngine.Object value)[] pairs)
     {
         var so = new SerializedObject(target);
         foreach (var (field, value) in pairs)
@@ -252,7 +251,7 @@ public static class PowerUIKit
         so.ApplyModifiedPropertiesWithoutUndo();
     }
 
-    public static void WireList(Object target, string field, IList<Object> values)
+    public static void WireList(UnityEngine.Object target, string field, IList<UnityEngine.Object> values)
     {
         var so = new SerializedObject(target);
         SerializedProperty property = so.FindProperty(field);
