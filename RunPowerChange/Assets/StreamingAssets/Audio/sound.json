@@ -1,0 +1,71 @@
+{
+    "bgm": [
+        {
+            "key": "idle",
+            "file": "bgm_idle.wav",
+            "volume": 0.9
+        },
+        {
+            "key": "race",
+            "file": "bgm_race.wav",
+            "volume": 1.0
+        },
+        {
+            "key": "result",
+            "file": "bgm_result.wav",
+            "volume": 0.9
+        }
+    ],
+    "sfx": [
+        {
+            "key": "join",
+            "file": "sfx_join.wav",
+            "volume": 1.0
+        },
+        {
+            "key": "ready",
+            "file": "sfx_ready.wav",
+            "volume": 1.0
+        },
+        {
+            "key": "count",
+            "file": "sfx_count.wav",
+            "volume": 1.0
+        },
+        {
+            "key": "go",
+            "file": "sfx_go.wav",
+            "volume": 1.0
+        },
+        {
+            "key": "finish",
+            "file": "sfx_finish.wav",
+            "volume": 1.0
+        },
+        {
+            "key": "select",
+            "file": "sfx_select.wav",
+            "volume": 1.0
+        },
+        {
+            "key": "card",
+            "file": "sfx_card.wav",
+            "volume": 0.8
+        },
+        {
+            "key": "money",
+            "file": "sfx_money.wav",
+            "volume": 1.0
+        },
+        {
+            "key": "ranking",
+            "file": "sfx_ranking.wav",
+            "volume": 1.0
+        },
+        {
+            "key": "tick",
+            "file": "sfx_tick.wav",
+            "volume": 0.6
+        }
+    ]
+}

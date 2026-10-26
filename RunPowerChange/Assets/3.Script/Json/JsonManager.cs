@@ -89,6 +89,8 @@ public class GameDynamicData
     public float saleSeconds = 10f;
     // 판매 금액 화면에서 카드가 하나씩 나타나는 간격(초)
     public float saleStepSeconds = 0.6f;
+    // 판매 금액이 0 부터 얻은 금액까지 올라가는 시간(초). 0이면 바로 표시
+    public float saleSlotSeconds = 1.8f;
 
     // 송전 전압 선택 화면에서 무입력 시 대기화면 복귀(초). 0 이하이면 사용 안 함. (그 밖의 화면은 자동으로 넘어간다)
     public float idleTimeoutSeconds = 30f;
@@ -106,6 +108,16 @@ public class GameDynamicData
     // 85형 아래 칸(랭킹 → 왜 그럴까요? → 우리와 어떤 관련이?)이 바뀌는 간격(초)
     public float spectatorInfoSeconds = 10f;
 
+    // 소리 (0~1). 소리 파일과 이름은 StreamingAssets/Audio/sound.json
+    public float masterVolume = 1f;
+    public float bgmVolume = 0.5f;
+    public float sfxVolume = 1f;
+    // 음소거. 볼륨 값은 그대로 두므로 풀면 원래 크기로 돌아온다.
+    public bool bgmMuted = false;
+    public bool sfxMuted = false;
+    // BGM 이 바뀔 때 앞 곡이 줄어들고 다음 곡이 커지는 시간(초)
+    public float bgmFadeSeconds = 1f;
+
     // 쳇바퀴별 연결 (PC 1대에 쳇바퀴 2대)
     public List<WheelConfig> wheels = new List<WheelConfig>
     {
@@ -114,6 +126,8 @@ public class GameDynamicData
     };
     // 85형 관전 화면 디스플레이 번호
     public int spectatorDisplayIndex = 2;
+    // 설정창·RS232 디버그 패널·F1 도움말을 띄울 디스플레이 번호 (0 = Display 1). 관람객 32형 화면을 가리지 않게 85형 쪽(2 = Display 3).
+    public int operatorDisplayIndex = 2;
 }
 
 [Serializable]

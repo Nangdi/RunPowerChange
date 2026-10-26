@@ -69,6 +69,11 @@ public static class PowerPlayTest
 
         // ── 2인 경주: 쳇바퀴 1 이 빠르고(14km/h) 2 가 느리다(9km/h) ──
         // 시각: 1.0 쳇바퀴1 시작(Open) → 2.2 쳇바퀴2 참여(전원 → Ready) → 준비·안내·카운트다운 → 달리기
+        Add(0.5f, "operator_display", () =>
+        {
+            foreach (var od in UnityEngine.Object.FindObjectsOfType<OperatorDisplay>(true))
+                Log($"  운영자 캔버스 {od.name}: Display {od.GetComponent<Canvas>().targetDisplay + 1}");
+        });
         Add(1f, "duo_start_w1", () => Session(1).StartExperience());
         Add(1.8f, "duo_join_screens", () => { Capture("01_join_w1_waiting", 1); Capture("02_join_w2_invite", 2); });
         Add(2.2f, "duo_start_w2", () => Session(2).StartExperience());
@@ -84,7 +89,11 @@ public static class PowerPlayTest
         Add(run + 18f, "duo_run_18s", () => { Capture("08_run_finish_w1", 1); Check("run18"); });
         Add(run + c.runSeconds + 0.5f, "duo_voltage", () => { speedKmh[1] = speedKmh[2] = 0f; Capture("09_voltage_w1", 1); });
         Add(run + c.runSeconds + 1.5f, "duo_select", () => { Session(1).SelectVoltage(1); Session(2).SelectVoltage(0); });
-        Add(run + c.runSeconds + 4.5f, "duo_sale", () => { Capture("10_sale_w1", 1); Capture("10_sale_w2", 2); });
+        // 판매 금액 슬롯: 도는 중 / 일부 자리 멈춤 / 다 맞춰짐
+        float slot = run + c.runSeconds + 1.5f + SaleSlot.StartTime(c);
+        Add(slot + 0.15f, "slot_spin", () => Capture("10a_slot_spin_w1", 1));
+        Add(slot + SaleSlot.Duration(c) * 0.6f, "slot_partial", () => Capture("10b_slot_partial_w1", 1));
+        Add(slot + SaleSlot.Duration(c) + 0.2f, "duo_sale", () => { Capture("10_sale_w1", 1); Capture("10_sale_w2", 2); });
         Add(run + c.runSeconds + 1.5f + c.saleSeconds + 1f, "duo_ranking", () => { Capture("11_ranking_w1", 1); CaptureSpectator("11_spectator_post"); });
         t = run + c.runSeconds + 1.5f + c.saleSeconds + c.resultAutoCloseSeconds + 1.5f;
         Add(t, "duo_idle", () => { Capture("12_idle_after_w1", 1); CaptureSpectator("12_spectator_idle"); Check("idle_after_duo"); });

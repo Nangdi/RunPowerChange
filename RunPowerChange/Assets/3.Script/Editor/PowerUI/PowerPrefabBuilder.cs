@@ -68,6 +68,7 @@ public static class PowerPrefabBuilder
 
             ApplyToScene(canvasPrefab);
             ApplySpectatorToScene(spectatorPrefab);
+            EnsureSoundManager();
             PowerSpriteExporter.ExportGuides();
             AssetDatabase.SaveAssets();
             Debug.Log("달려라 전력 챌린지 프리팹 적용 완료. 씬을 저장하세요.");
@@ -682,6 +683,21 @@ public static class PowerPrefabBuilder
         WireList(view, "sessions", Array.ConvertAll(sessions, s => (UnityEngine.Object)s));
         foreach (var cam in UnityEngine.Object.FindObjectsOfType<RaceCamera>(true))
             if (cam.Screen == RaceCamera.Target.Spectator) Wire(view, ("raceCamera", cam.GetComponent<Camera>()));
+        EditorSceneManager.MarkSceneDirty(SceneManager.GetActiveScene());
+    }
+
+    // 소리 매니저(BGM·효과음)와 게임 진행 → 소리 연결
+    private static void EnsureSoundManager()
+    {
+        GameObject go = FindRoot("SoundManager");
+        if (go == null)
+        {
+            go = new GameObject("SoundManager");
+            Undo.RegisterCreatedObjectUndo(go, "Create SoundManager");
+        }
+        if (!go.TryGetComponent(out SoundManager _)) go.AddComponent<SoundManager>();
+        PowerSoundDirector director = go.TryGetComponent(out PowerSoundDirector existing) ? existing : go.AddComponent<PowerSoundDirector>();
+        WireList(director, "sessions", Array.ConvertAll(SortedSessions(), s => (UnityEngine.Object)s));
         EditorSceneManager.MarkSceneDirty(SceneManager.GetActiveScene());
     }
 

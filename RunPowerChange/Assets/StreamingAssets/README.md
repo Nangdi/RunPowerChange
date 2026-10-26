@@ -31,6 +31,7 @@
 | `voltages[]` | 낮은/높은 전압 | `lossRate` 송전손실 비율, `facilityCostWon` 승압·강압 설비 비용(판매금액에서 차감, 높은 전압 300원) |
 | `saleSeconds` | 10 | 최종 전력 판매 금액 화면(초) |
 | `saleStepSeconds` | 0.6 | 판매 금액 화면에서 카드가 하나씩 나타나는 간격(초) |
+| `saleSlotSeconds` | 1.8 | 판매 금액이 0 부터 얻은 금액까지 올라가는 시간(초). 0이면 바로 표시 |
 | `idleTimeoutSeconds` | 30 | 전압 선택 화면에서 무입력 시 대기화면 복귀(초, 0=끔, 랭킹 기록 안 함). 다른 화면은 정해진 시간에 자동으로 넘어감 |
 | `resultAutoCloseSeconds` | 10 | 랭킹 화면 자동 넘김(초) |
 | `speedometerMaxKmh` | 20 | 속도계 바늘이 끝까지 가는 속도(km/h) |
@@ -38,7 +39,11 @@
 | `raceScrollPerMeter` | 1.5 | 3D 배경(기둥·레일)이 달린 1m 마다 흘러가는 거리. 클수록 배경이 빨리 지나감 |
 | `raceGapPerMeter` | 0.1 | 거리 차 1m 를 화면에서 앞뒤로 벌리는 정도. 클수록 조금만 앞서도 크게 벌어짐 |
 | `spectatorInfoSeconds` | 10 | 85형 아래 칸(랭킹 → 왜 그럴까요? → 우리와 어떤 관련이?)이 바뀌는 간격(초) |
+| `masterVolume`, `bgmVolume`, `sfxVolume` | 1, 0.5, 1 | 전체·배경음악·효과음 볼륨 (0~1). 소리 파일은 `Audio/` 폴더 README 참고 |
+| `bgmMuted`, `sfxMuted` | false | 배경음악·효과음 음소거 (볼륨 값은 그대로 두고 소리만 끔) |
+| `bgmFadeSeconds` | 1 | 배경음악이 바뀔 때 겹쳐 넘어가는 시간(초) |
 | `wheels[]` | 2대 | 쳇바퀴 번호, 센서 컨트롤러 id, 32형 디스플레이 번호(0부터), 시뮬레이션 키(누를 때마다 회전 신호 1개) |
+| `operatorDisplayIndex` | 2 | 설정창(ESC)·RS232 디버그 패널·F1 도움말을 띄울 디스플레이 (0 = Display 1). 관람객 32형 화면을 가리지 않게 85형 쪽. 재시작 후 적용 |
 | `spectatorDisplayIndex` | 2 | 85형 관전 화면(세로) 디스플레이 번호 |
 
 계수는 모두 체험용 임시값입니다. 관람객 화면에는 정량 계수를 표시하지 않습니다.

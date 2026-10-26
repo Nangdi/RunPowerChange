@@ -20,6 +20,7 @@
     ],
     "saleSeconds": 10.0,
     "saleStepSeconds": 0.6,
+    "saleSlotSeconds": 1.8,
     "idleTimeoutSeconds": 30.0,
     "resultAutoCloseSeconds": 10.0,
     "speedometerMaxKmh": 20.0,
@@ -27,9 +28,16 @@
     "raceScrollPerMeter": 1.5,
     "raceGapPerMeter": 0.1,
     "spectatorInfoSeconds": 10.0,
+    "masterVolume": 1.0,
+    "bgmVolume": 0.5,
+    "sfxVolume": 1.0,
+    "bgmMuted": false,
+    "sfxMuted": false,
+    "bgmFadeSeconds": 1.0,
     "wheels": [
         { "wheelId": 1, "controllerId": 1, "displayIndex": 0, "simulateKey": "UpArrow" },
         { "wheelId": 2, "controllerId": 2, "displayIndex": 1, "simulateKey": "W" }
     ],
-    "spectatorDisplayIndex": 2
+    "spectatorDisplayIndex": 2,
+    "operatorDisplayIndex": 2
 }

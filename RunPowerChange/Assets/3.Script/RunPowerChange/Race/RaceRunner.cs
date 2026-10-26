@@ -8,6 +8,7 @@ using UnityEngine;
 //  - 그 화면의 체험자 캐릭터는 제자리
 //  - 상대 캐릭터는 거리 차만큼 앞(내가 뒤처질 때) 또는 뒤(내가 앞설 때, 화면 밖으로 나가도 됨)로 간다 (RaceStage.ScreenGapZ)
 // 85형 바퀴는 두 레인이 다 보이도록 더 많이 달린 쪽만 앞으로 나간다 (RaceStage.GapZ).
+// 85형에서는 이번 회차 참가자가 아닌 레인(대기 중 빈 레인, 1위 고스트 레인)의 바퀴를 반투명으로 그려 사람이 없는 레인임을 알린다.
 //
 // 표시 방식
 //  - Player : 자기 쳇바퀴 체험자 (대기 중에는 출발선에 서 있음)
@@ -55,8 +56,10 @@ public class RaceRunner : MonoBehaviour
     [SerializeField] private float followSharpness = 6f;
     [Tooltip("앞뒤 간격이 바뀌는 빠르기")]
     [SerializeField] private float gapSharpness = 3f;
-    [Tooltip("32형에서 상대가 내 캐릭터보다 이만큼(유닛) 뒤로 처지면 그 화면에서 숨긴다. 카메라 바로 앞을 크게 지나가지 않게")]
-    [SerializeField] private float hideBehindGap = 1f;
+    [Tooltip("32형에서 상대가 내 캐릭터보다 이만큼(유닛) 뒤로 처지면 옅어지기 시작한다")]
+    [SerializeField] private float fadeStartBehind = 0.3f;
+    [Tooltip("이만큼(유닛) 뒤로 처지면 완전히 사라진다. 카메라 바로 앞을 크게 지나가기 전에 서서히 없어지게")]
+    [SerializeField] private float fadeEndBehind = 2.2f;
 
     public int WheelId => wheelId;
     public WheelSession Session => session;
@@ -77,6 +80,7 @@ public class RaceRunner : MonoBehaviour
         public Animator animator;
         public Renderer[] renderers;
         public float gapZ;
+        public float alpha = -1f;   // 지금 칠한 불투명도 (-1 = 아직 안 칠함)
     }
 
     private readonly View[] views = new View[ScreenCount];
@@ -88,10 +92,18 @@ public class RaceRunner : MonoBehaviour
     private bool running;
     private Mode builtMode = (Mode)(-1);
     private readonly Dictionary<Renderer, Material[]> originalMaterials = new Dictionary<Renderer, Material[]>();
+    private readonly Dictionary<Renderer, Material[]> wheelMaterials = new Dictionary<Renderer, Material[]>();
+    private bool wheelGhost;
+    private bool wheelGhostBuilt;
 
     private void Awake()
     {
-        if (wheel != null) wheelBase = wheel.localPosition;
+        if (wheel != null)
+        {
+            wheelBase = wheel.localPosition;
+            foreach (var r in wheel.GetComponentsInChildren<Renderer>(true))
+                wheelMaterials[r] = r.sharedMaterials;
+        }
         if (character == null) return;
 
         characterBase = character.localPosition;
@@ -137,6 +149,16 @@ public class RaceRunner : MonoBehaviour
         if (mode != builtMode) Apply(mode);
         CurrentMode = mode;
 
+        // 85형: 이번 회차에 사람이 달리는 레인만 진하게
+        var round = GameRound.Instance;
+        bool playing = mode == Mode.Player && round != null && round.Current != GameRound.Phase.Idle && round.IsParticipant(session);
+        if (!wheelGhostBuilt || wheelGhost == playing)
+        {
+            wheelGhostBuilt = true;
+            wheelGhost = !playing;
+            ApplyAlpha(wheelMaterials.Keys, wheelMaterials, wheelGhost ? ghostAlpha : 1f);
+        }
+
         float dt = Time.unscaledDeltaTime;
         float prev = DistanceM;
         // 출발선으로 돌아가는 경우(새 체험)는 바로 옮기고 앞뒤 간격도 바로 맞춘다
@@ -165,12 +187,21 @@ public class RaceRunner : MonoBehaviour
             float target = IsActive ? stage.ScreenGapZ(i + 1, this) : 0f;
             view.gapZ = Mathf.Lerp(view.gapZ, target, t);
             view.root.localPosition = characterBase + forward * view.gapZ;
-            bool visible = IsActive && view.gapZ > -hideBehindGap;
+
+            // 뒤로 처질수록 서서히 옅어지다 사라진다 (1위 고스트는 원래 반투명에서 더 옅어진다)
+            float fade = Mathf.InverseLerp(-fadeEndBehind, -fadeStartBehind, view.gapZ);
+            float alpha = (CurrentMode == Mode.Leader ? ghostAlpha : 1f) * fade;
+            bool visible = IsActive && fade > 0.01f;
             if (view.root.gameObject.activeSelf != visible)
             {
                 view.root.gameObject.SetActive(visible);
                 // 다시 켜지면 애니메이터가 기본 동작부터 시작하므로 지금 동작(달리기/서기)으로 맞춘다
                 if (visible && view.animator != null) view.animator.Play(running ? runState : idleState, 0, 0f);
+            }
+            if (visible && (view.alpha < 0f || Mathf.Abs(view.alpha - alpha) > 0.02f || (alpha >= 0.999f) != (view.alpha >= 0.999f)))
+            {
+                view.alpha = alpha;
+                ApplyAlpha(view.renderers, originalMaterials, alpha);
             }
         }
 
@@ -231,7 +262,8 @@ public class RaceRunner : MonoBehaviour
         builtMode = mode;
         // 화면별 캐릭터는 ApplyStage 가 앞뒤 간격과 함께 켜고 끈다
         if (wheel != null) wheel.gameObject.SetActive(mode != Mode.Hidden);
-        SetGhost(mode == Mode.Leader);
+        foreach (var view in views)
+            if (view != null) view.alpha = -1f;   // ApplyStage 가 이 모드의 불투명도로 다시 칠한다
         running = false;
         snapGap = true;
         foreach (var view in views)
@@ -242,16 +274,14 @@ public class RaceRunner : MonoBehaviour
         }
     }
 
-    // 모든 재질을 반투명 재질로 바꾸고 원래 텍스처·색에 알파만 낮춰 칠한다
-    private void SetGhost(bool ghost)
+    // alpha 가 1 이면 원래 재질, 1 보다 작으면 모든 재질을 반투명 재질로 바꾸고 원래 텍스처·색에 알파만 낮춰 칠한다
+    private void ApplyAlpha(IEnumerable<Renderer> renderers, Dictionary<Renderer, Material[]> materials, float alpha)
     {
         var block = new MaterialPropertyBlock();
-        foreach (var pair in originalMaterials)
+        foreach (Renderer r in renderers)
         {
-            Renderer r = pair.Key;
-            if (r == null) continue;
-            Material[] original = pair.Value;
-            if (!ghost || ghostMaterial == null)
+            if (r == null || !materials.TryGetValue(r, out Material[] original)) continue;
+            if (alpha >= 0.999f || ghostMaterial == null)
             {
                 r.sharedMaterials = original;
                 for (int i = 0; i < original.Length; i++) r.SetPropertyBlock(null, i);
@@ -265,7 +295,7 @@ public class RaceRunner : MonoBehaviour
             {
                 Material m = original[i];
                 Color c = m != null && m.HasProperty(BaseColorId) ? m.GetColor(BaseColorId) : Color.white;
-                c.a = ghostAlpha;
+                c.a = alpha;
                 block.Clear();
                 block.SetColor(BaseColorId, c);
                 foreach (int id in BaseMapIds)

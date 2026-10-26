@@ -243,6 +243,8 @@ MonoBehaviour:
   moneyText: {fileID: 254812199270976022}
   popSeconds: 0.35
   popScale: 0.85
+  doneScale: 1.06
+  doneSeconds: 0.4
 --- !u!1 &2344477531050987347
 GameObject:
   m_ObjectHideFlags: 0

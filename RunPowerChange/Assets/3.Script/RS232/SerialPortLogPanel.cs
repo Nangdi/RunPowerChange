@@ -85,7 +85,7 @@ public class SerialPortLogPanel : MonoBehaviour
         RefreshAllStatus();
 
         if (!SettingsPanelUI.Exists)
-            ShortcutHelp.Register(this, toggleKey, "RS232 디버그 패널 열기/닫기", "모든 화면, Display 1에 표시");
+            ShortcutHelp.Register(this, toggleKey, "RS232 디버그 패널 열기/닫기", $"모든 화면, {OperatorDisplay.DisplayName}에 표시");
 
         if (hideOnStart && togglePanel != null)
             togglePanel.SetActive(false);

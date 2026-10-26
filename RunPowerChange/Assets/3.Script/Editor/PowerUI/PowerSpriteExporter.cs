@@ -66,7 +66,7 @@ public static class PowerSpriteExporter
 
     // 실행 중인 패널(지금 상태 그대로)을 3D 화면 캡처 위에 그려 저장한다 (플레이 모드 시험용).
     // 복제본은 스크립트를 떼고 그리므로 실행 중인 패널에는 영향이 없다.
-    public static void RenderLive(GameObject livePanel, Texture background, Vector2 size, string outPath)
+    public static void RenderLive(GameObject livePanel, Texture background, Vector2 size, string outPath, bool stretch = true)
     {
         Texture2D tex = Render((int)size.x, (int)size.y, root =>
         {
@@ -81,9 +81,12 @@ public static class PowerSpriteExporter
             foreach (var mb in clone.GetComponentsInChildren<MonoBehaviour>(true))
                 if (mb != null && mb.GetType().Assembly.GetName().Name == "Assembly-CSharp") UnityEngine.Object.DestroyImmediate(mb);
             var rt = (RectTransform)clone.transform;
-            rt.anchorMin = Vector2.zero;
-            rt.anchorMax = Vector2.one;
-            rt.offsetMin = rt.offsetMax = Vector2.zero;
+            if (stretch)
+            {
+                rt.anchorMin = Vector2.zero;
+                rt.anchorMax = Vector2.one;
+                rt.offsetMin = rt.offsetMax = Vector2.zero;
+            }
             clone.SetActive(true);
             holder.gameObject.SetActive(true);
         });
