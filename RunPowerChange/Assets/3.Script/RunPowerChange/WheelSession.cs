@@ -45,10 +45,10 @@ public class WheelSession : MonoBehaviour
     public float MaxSpeedKmh { get; private set; }
     public float AverageWatt => PowerModel.AverageWatt(EnergyWh, RunElapsed);
     public bool IsRunning => Current == State.Run;
-    // 시안의 "누적 환산 발전량": 지금까지의 평균 출력으로 saleScaleMinutes 동안 달렸을 때의 발전량 (Wh)
-    public float ScaledEnergyWh => PowerModel.ScaledEnergyWh(EnergyWh, RunElapsed, Config);
+    // 시안의 "누적 환산 발전량" (Wh). 달리는 동안 늘어나고, 끝나는 순간 판매에 쓰는 환산 발전량(Sale.sentWh)과 같아진다.
+    public float ScaledEnergyWh => PowerModel.ScaledEnergyWh(EnergyWh, Config);
     // 게이지 최대값: 최대 출력으로 saleScaleMinutes 동안 달렸을 때 (Wh)
-    public float MaxScaledEnergyWh => Mathf.Max(0f, Config.maxWatt) * Mathf.Max(0f, Config.saleScaleMinutes) / 60f;
+    public float MaxScaledEnergyWh => PowerModel.ScaledWh(Config.MaxWatt, Config);
 
     // 발전 결과 (SelectVoltage 부터 유효). 순위는 아직 기록 전이므로 미리 계산한 값.
     public int EnergyRank { get; private set; }

@@ -39,6 +39,8 @@ public class VoltageOption
     // 송전 중 손실 비율 (0~1). 도착 전력 = 출발 전력 × (1 - lossRate)
     public float lossRate = 0.05f;
     // 승압·강압 설비 비용(원). 판매금액에서 뺀다. 적게 보내면 고전압이 오히려 불리해지도록 둔다.
+    // 높은 전압 기본값: 평균 체험자(10km/h)가 끝까지 달렸을 때 높은 전압 판매금액(114원)의 약 30%.
+    // wattPerKmh·wonPerKWh 를 바꾸면 이 기준으로 다시 계산해 넣는다.
     public float facilityCostWon;
 }
 
@@ -54,9 +56,10 @@ public class GameDynamicData
     // 체험 안내 화면 자동 넘김(초)
     public float guideSeconds = 10f;
     // 한 명이 시작한 뒤 다른 쳇바퀴가 같은 회차로 합류할 수 있는 시간(초). 참가 대기 화면에 남은 초가 나온다.
-    public float joinWaitSeconds = 9f;
+    public float joinWaitSeconds = 15f;
     // 참가가 마감된 뒤 "준비하세요!" 화면(초). 끝나면 체험 안내로 넘어간다.
-    public float readySeconds = 3f;
+    // 0 이면 이 화면 없이 바로 체험 안내로 넘어간다 (기본). 참가 대기 초를 센 뒤 또 초를 세면 어색해서 뺐다.
+    public float readySeconds = 0f;
 
     // 쳇바퀴 1회전 이동거리(m). 컨트롤러가 1회전마다 신호를 보내면 이만큼 거리를 더한다. (직경 2m → 6.283)
     public float wheelCircumferenceM = 6.283f;
@@ -69,20 +72,22 @@ public class GameDynamicData
     // 정지 후 첫 회전 신호는 속도를 아직 모르므로, 화면 캐릭터가 그 1회전 거리를 이 시간(초)에 걸쳐 걸어간다
     public float firstRotationSeconds = 2f;
 
-    // 환산 발전출력(W) = min(maxWatt, 속도(km/h) × wattPerKmh)
-    public float wattPerKmh = 15f;
-    public float maxWatt = 300f;
+    // 환산 발전출력(W) = min(MaxWatt, 속도(km/h) × wattPerKmh)
+    // 현장 기본 1: 12km/h 로 달리면 12W. 20 이면 걷기 5km/h 100W, 구성안 예시 150W = 7.5km/h (직경 2m 쳇바퀴 1km/h ≈ 2.65rpm)
+    public float wattPerKmh = 1f;
+    // 최대 출력(W)은 따로 정하지 않고 wattPerKmh × speedometerMaxKmh 로 계산한다.
+    // wattPerKmh 를 바꿔도 속도계 끝 속도에서 출력이 최대가 되어 게이지·속도계가 어긋나지 않는다.
+    public float MaxWatt => Mathf.Max(0f, wattPerKmh) * Mathf.Max(0f, speedometerMaxKmh);
 
     // 판매 환산: "이 속도로 saleScaleMinutes 분 달렸을 때" 의 발전량으로 계산 (시안: 100시간)
     public float saleScaleMinutes = 6000f;
-    // 판매단가 기준: 이 속도(km/h, 15세 평균 최고속도)로 체험 시간 내내 달리고 가장 유리한 전압을 고르면
-    // 판매 금액이 saleReferenceWon 이 되도록 판매단가(원/kWh)를 자동으로 정한다. (50m 평균 약 8.7초 ≈ 20km/h)
-    public float saleReferenceKmh = 20f;
-    public float saleReferenceWon = 5000f;
+    // 판매단가(원/kWh). 도착 전력(kWh) × 이 값이 판매 금액이다.
+    // 발전사업자가 한전에 전기를 팔 때 받는 계통한계가격(SMP, 육지)이 최근 kWh 당 약 110~130원이라 그 가운데 값으로 둔다. 한전 자문 후 조정.
+    public float wonPerKWh = 120f;
     public List<VoltageOption> voltages = new List<VoltageOption>
     {
         new VoltageOption { id = "low", label = "낮은 전압", lossRate = 0.30f, facilityCostWon = 0f },
-        new VoltageOption { id = "high", label = "높은 전압", lossRate = 0.05f, facilityCostWon = 300f },
+        new VoltageOption { id = "high", label = "높은 전압", lossRate = 0.05f, facilityCostWon = 34f },
     };
 
     // 최종 전력 판매 금액 화면(초). 끝나면 랭킹 화면으로 넘어간다.
@@ -95,16 +100,23 @@ public class GameDynamicData
     // 송전 전압 선택 화면에서 무입력 시 대기화면 복귀(초). 0 이하이면 사용 안 함. (그 밖의 화면은 자동으로 넘어간다)
     public float idleTimeoutSeconds = 30f;
     // 랭킹 화면 자동 넘김(초)
-    public float resultAutoCloseSeconds = 10f;
+    public float resultAutoCloseSeconds = 15f;
 
-    // 속도계 바늘이 끝까지 가는 속도(km/h)
-    public float speedometerMaxKmh = 20f;
+    // 속도계 바늘이 끝까지 가는 속도(km/h)이자 출력이 최대(MaxWatt)가 되는 속도. 이보다 빨리 달려도 출력은 늘지 않는다.
+    public float speedometerMaxKmh = 30f;
     // 결승선이 체험 끝나기 몇 초 전부터 다가오는지
     public float finishApproachSeconds = 10f;
     // 3D 배경(기둥·레일)이 달린 1m 마다 흘러가는 거리(유닛). 클수록 같은 속도에서 배경이 빨리 지나간다.
     public float raceScrollPerMeter = 1.5f;
     // 두 체험자의 거리 차 1m 를 화면에서 앞뒤로 몇 유닛 벌릴지. 클수록 조금만 앞서도 크게 벌어진다.
     public float raceGapPerMeter = 0.1f;
+    // 캐릭터 달리기 동작 배속. 막 움직이기 시작할 때 characterAnimMinSpeed(걷듯이 느리게)에서
+    // characterAnimMaxKmh 에서 characterAnimMaxSpeed 까지 속도에 비례해 빨라진다.
+    // 초등 고학년~중학생이 2m 쳇바퀴에서 내는 속도(예상: 걷기 3~4, 조깅 6~8, 열심히 10~13, 순간 최고 15~18km/h)에 맞춘 값:
+    // 4km/h 0.7배, 7km/h 1배, 12km/h 1.4배, 18km/h 이상 2배
+    public float characterAnimMinSpeed = 0.5f;
+    public float characterAnimMaxSpeed = 2f;
+    public float characterAnimMaxKmh = 18f;
     // 85형 아래 칸(랭킹 → 왜 그럴까요? → 우리와 어떤 관련이?)이 바뀌는 간격(초)
     public float spectatorInfoSeconds = 10f;
 

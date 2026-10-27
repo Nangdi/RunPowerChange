@@ -4,7 +4,7 @@ using UnityEngine;
 
 // 두 쳇바퀴가 같이 쓰는 게임 회차. 같은 회차의 체험자는 같이 안내를 보고, 같이 카운트다운하고, 같이 달린다.
 //
-// Idle ─(한 명 시작)→ Open ─(합류 시간 끝 또는 전원 참가)→ Ready → Guide → Countdown → Run → Post ─(참가자 모두 대기화면 복귀)→ Idle
+// Idle ─(한 명 시작)→ Open ─(합류 시간 끝 또는 전원 참가)→ Ready(readySeconds 가 0 이면 건너뜀) → Guide → Countdown → Run → Post ─(참가자 모두 대기화면 복귀)→ Idle
 //
 // - Open 동안(joinWaitSeconds) 다른 쳇바퀴 화면에는 "참여하기" 버튼이 나오고, 누르면 같은 회차로 합류한다 (2인 경주).
 // - 그 뒤(회차 진행 중)에는 다른 쳇바퀴 대기화면의 체험시작이 막히고 "체험 중" 안내가 나온다. 회차가 끝나면 다시 시작할 수 있다.
@@ -172,6 +172,7 @@ public class GameRound : MonoBehaviour
         LeaderFromPreviousDay = RaceRecordStore.LeadersFromPreviousDay;
         runElapsedAtEnd = 0f;
         GoTo(Phase.Ready);
+        if (Config.readySeconds <= 0f) BeginGuide();
     }
 
     private void BeginGuide()

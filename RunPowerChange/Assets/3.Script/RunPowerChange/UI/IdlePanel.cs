@@ -2,13 +2,13 @@ using TMPro;
 using UnityEngine;
 using UnityEngine.UI;
 
-// 01. 대기화면 - 화면 어디를 눌러도 시작. 체험시작 버튼 그림은 살짝 커졌다 작아지며 터치를 유도한다.
+// 01. 대기화면 - 체험시작 버튼을 눌러야 시작한다. 버튼 그림은 살짝 커졌다 작아지며 터치를 유도한다.
 // 옆 쳇바퀴의 체험이 진행 중이라 합류할 수 없으면 버튼을 흐리게 막고 "체험 중" 안내와 남은 시간을 보여 준다.
 public class IdlePanel : WheelPanel
 {
-    [Tooltip("화면 전체를 덮는 투명 버튼")]
+    [Tooltip("체험시작 버튼")]
     [SerializeField] private Button startButton;
-    [Tooltip("체험시작 버튼 그림 (숨쉬기 효과). 비워두면 효과 없음")]
+    [Tooltip("체험시작 버튼 그림 (숨쉬기 효과, 보통 startButton 과 같은 오브젝트). 비워두면 효과 없음")]
     [SerializeField] private Image startBadge;
     [SerializeField] private float pulseScale = 0.04f;
     [SerializeField] private float pulseSeconds = 1.6f;

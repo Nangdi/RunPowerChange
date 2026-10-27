@@ -29,10 +29,8 @@ public class RaceRunner : MonoBehaviour
     [SerializeField] private Animator characterAnimator;
     [SerializeField] private string runState = "달리기";
     [SerializeField] private string idleState = "아이들";
-    [Tooltip("이 속도(m/s)일 때 달리기 애니메이션을 1배속으로 재생")]
-    [SerializeField] private float runAnimationMps = 3f;
-    [Tooltip("달리기 애니메이션 배속 범위. 좁을수록 속도가 출렁여도 동작이 자연스럽다")]
-    [SerializeField] private Vector2 runAnimationSpeedRange = new Vector2(0.7f, 1.6f);
+    // 달리기 동작 배속은 Setting.json 으로 정한다: 달리기 시작 속도(idleToRunMps)에서 characterAnimMinSpeed(걷듯이 느리게),
+    // characterAnimMaxKmh 에서 characterAnimMaxSpeed. 그 사이는 속도에 비례해 빨라진다. (모델에 걷기 동작이 없어 달리기 동작을 느리게 튼다)
     [Tooltip("이 속도(m/s)보다 빠르면 달리기, runToIdleMps 보다 느리면 서기 (사이 값에서는 지금 동작 유지)")]
     [SerializeField] private float idleToRunMps = 0.6f;
     [SerializeField] private float runToIdleMps = 0.25f;
@@ -221,7 +219,7 @@ public class RaceRunner : MonoBehaviour
         bool run = running ? animSpeedMps > runToIdleMps : animSpeedMps > idleToRunMps;
         bool changed = run != running;
         running = run;
-        float target = run ? Mathf.Clamp(animSpeedMps / Mathf.Max(0.1f, runAnimationMps), runAnimationSpeedRange.x, runAnimationSpeedRange.y) : 1f;
+        float target = run ? RunAnimationSpeed(animSpeedMps) : 1f;
         foreach (var view in views)
         {
             Animator a = view?.animator;
@@ -229,6 +227,15 @@ public class RaceRunner : MonoBehaviour
             if (changed) a.CrossFadeInFixedTime(run ? runState : idleState, 0.25f);
             a.speed = Mathf.Lerp(a.speed, target, 1f - Mathf.Exp(-4f * Time.unscaledDeltaTime));
         }
+    }
+
+    // 속도(m/s) → 달리기 동작 배속
+    private float RunAnimationSpeed(float mps)
+    {
+        var cfg = JsonManager.instance != null ? JsonManager.instance.gameDynamicData : null;
+        if (cfg == null) return 1f;
+        float t = Mathf.InverseLerp(idleToRunMps, Mathf.Max(idleToRunMps + 0.1f, cfg.characterAnimMaxKmh / 3.6f), mps);
+        return Mathf.Lerp(Mathf.Max(0.05f, cfg.characterAnimMinSpeed), Mathf.Max(0.05f, cfg.characterAnimMaxSpeed), t);
     }
 
     private void Resolve(out Mode mode, out float distance)

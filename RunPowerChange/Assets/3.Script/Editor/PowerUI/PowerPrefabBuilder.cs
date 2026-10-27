@@ -231,8 +231,10 @@ public static class PowerPrefabBuilder
     {
         RectTransform panel = CreatePanelRoot("Idle");
 
-        // 시작 버튼 그림은 표시만 하고, 터치는 화면 전체를 덮는 투명 버튼이 받는다
-        Image badge = PartImage(panel, "StartBadge", "Button_Start");
+        // 체험시작 버튼 그림을 눌러야만 시작한다 (화면의 다른 곳은 반응하지 않음)
+        Button start = PartButton(panel, "StartButton", "Button_Start");
+        start.transition = Selectable.Transition.None;
+        Image badge = (Image)start.targetGraphic;
 
         // 옆 쳇바퀴 체험 진행 중 안내 (버튼 바로 위)
         Rect button = Psd("Button_Start");
@@ -242,13 +244,6 @@ public static class PowerPrefabBuilder
             $"지금 <color={YellowHex}>다른 체험</color>이 진행 중이에요. 약 90초 후 체험할 수 있어요.", 34, WhiteColor, Weight.SemiBold);
         busyText.enableWordWrapping = false;
         busy.gameObject.SetActive(false);
-
-        RectTransform touch = StretchFull(CreateRect("StartButton", panel));
-        Image touchImage = AddImage(touch, new Color(0, 0, 0, 0));
-        touchImage.raycastTarget = true;
-        var start = touch.gameObject.AddComponent<Button>();
-        start.targetGraphic = touchImage;
-        start.transition = Selectable.Transition.None;
 
         var view = panel.gameObject.AddComponent<IdlePanel>();
         Wire(view, ("startButton", start), ("startBadge", badge), ("busyGroup", busy.gameObject), ("busyText", busyText));
