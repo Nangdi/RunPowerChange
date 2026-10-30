@@ -7753,8 +7753,8 @@ MonoBehaviour:
     m_HorizontalOverflow: 0
     m_VerticalOverflow: 0
     m_LineSpacing: 1
-  m_Text: "\uC6B4\uC601\uC790 \uD654\uBA74 (\uC124\uC815\uCC3D\xB7\uB514\uBC84\uADF8)
-    \uCD9C\uB825 \uB514\uC2A4\uD50C\uB808\uC774"
+  m_Text: "\uC124\uC815\uCC3D\xB7\uB514\uBC84\uADF8 \uD328\uB110\uC744 \uB744\uC6B8
+    \uB514\uC2A4\uD50C\uB808\uC774"
 --- !u!222 &479453949
 CanvasRenderer:
   m_ObjectHideFlags: 0
@@ -7949,6 +7949,7 @@ RectTransform:
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children:
+  - {fileID: 1802308416}
   - {fileID: 750268004}
   - {fileID: 1093651191}
   - {fileID: 566026576}
@@ -8712,7 +8713,6 @@ RectTransform:
   - {fileID: 391417993}
   - {fileID: 195526890}
   - {fileID: 391753377}
-  - {fileID: 1802308416}
   m_Father: {fileID: 1412350039}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
   m_AnchorMin: {x: 0, y: 1}
@@ -28041,7 +28041,7 @@ GameObject:
   - component: {fileID: 1802308416}
   - component: {fileID: 1802308417}
   m_Layer: 0
-  m_Name: Display_OperatorDisplay
+  m_Name: Display_SettingsWindow
   m_TagString: Untagged
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
@@ -28054,18 +28054,18 @@ RectTransform:
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 1802308415}
-  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalRotation: {x: -0, y: -0, z: -0, w: 1}
   m_LocalPosition: {x: 0, y: 0, z: 0}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children:
   - {fileID: 479453947}
   - {fileID: 1194956092}
-  m_Father: {fileID: 539926959}
+  m_Father: {fileID: 511278181}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
   m_AnchorMin: {x: 0, y: 1}
   m_AnchorMax: {x: 0, y: 1}
-  m_AnchoredPosition: {x: 256, y: -644}
+  m_AnchoredPosition: {x: 791.9999, y: -644}
   m_SizeDelta: {x: 512, y: 28}
   m_Pivot: {x: 0.5, y: 0.5}
 --- !u!114 &1802308417

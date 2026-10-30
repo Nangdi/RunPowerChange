@@ -16,7 +16,7 @@ public class DisplaySetup : MonoBehaviour
         yield return null;
 
         var cfg = JsonManager.instance.gameDynamicData;
-        var configured = new HashSet<int> { cfg.spectatorDisplayIndex };
+        var configured = new HashSet<int> { cfg.spectatorDisplayIndex, OperatorDisplay.Index };
         foreach (var w in cfg.wheels)
             if (w != null) configured.Add(w.displayIndex);
 
