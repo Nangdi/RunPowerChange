@@ -19,6 +19,8 @@ public static class PowerPlayTest
         public float at;          // 시험 시작 후 시각(초)
         public string name;
         public Action action;
+        // 이 조건이 맞을 때까지 시험 시계를 멈춰 둔다 (플레이 모드 진입·캡처로 게임 진행이 밀려도 뒤 단계가 어긋나지 않게)
+        public Func<bool> until;
     }
 
     private static readonly List<Step> steps = new List<Step>();
@@ -60,6 +62,7 @@ public static class PowerPlayTest
         log.Clear();
         steps.Clear();
         nextStep = 0;
+        waitStart = -1;
         Array.Clear(speedKmh, 0, speedKmh.Length);
 
         // 화면 하나씩 볼 시간만 남기고 줄인다 (메모리 값만 바꾸고 파일에는 저장하지 않는다)
@@ -88,7 +91,8 @@ public static class PowerPlayTest
         Add(run + 8f, "duo_run_8s", () => { Capture("07_run_8s_w1", 1); Capture("07_run_8s_w2", 2); CaptureSpectator("07_spectator_run"); Check("run8"); });
         Add(run + 18f, "duo_run_18s", () => { Capture("08_run_finish_w1", 1); Check("run18"); });
         Add(run + c.runSeconds + 0.5f, "duo_voltage", () => { speedKmh[1] = speedKmh[2] = 0f; Capture("09_voltage_w1", 1); });
-        Add(run + c.runSeconds + 1.5f, "duo_select", () => { Session(1).SelectVoltage(1); Session(2).SelectVoltage(0); });
+        Add(run + c.runSeconds + 1.5f, "duo_select", () => { Session(1).SelectVoltage(1); Session(2).SelectVoltage(0); },
+            () => Session(1).Current == WheelSession.State.SelectVoltage && Session(2).Current == WheelSession.State.SelectVoltage);
         // 판매 금액 슬롯: 도는 중 / 일부 자리 멈춤 / 다 맞춰짐
         float slot = run + c.runSeconds + 1.5f + SaleSlot.StartTime(c);
         Add(slot + 0.15f, "slot_spin", () => Capture("10a_slot_spin_w1", 1));
@@ -100,14 +104,28 @@ public static class PowerPlayTest
 
         // ── 1인 체험 (빈 레인에 방금 기록 중 1위가 고스트로) ──
         t += 1f;
-        Add(t, "solo_start_w2", () => Session(2).StartExperience());
+        Add(t, "solo_start_w2", () => Session(2).StartExperience(), () => GameRound.Instance.Current == GameRound.Phase.Idle);
         count = t + c.joinWaitSeconds + c.readySeconds + c.guideSeconds;
         Add(count + 0.3f, "solo_count", () => speedKmh[2] = 11f);
         run = count + c.countdownSeconds;
         Add(run + 6f, "solo_run", () => { Capture("13_solo_run_w2", 2); Capture("14_solo_busy_w1", 1); CaptureSpectator("13_spectator_solo"); Check("solo_run"); });
-        Add(run + c.runSeconds + 0.5f, "solo_end", () => { speedKmh[2] = 0f; Session(2).SelectVoltage(1); });
+        Add(run + c.runSeconds + 0.5f, "solo_end", () => { speedKmh[2] = 0f; Session(2).SelectVoltage(1); },
+            () => Session(2).Current == WheelSession.State.SelectVoltage);
         t = run + c.runSeconds + 0.5f + c.saleSeconds + c.resultAutoCloseSeconds + 1.5f;
         Add(t, "solo_idle", () => { CaptureSpectator("15_spectator_idle"); Check("idle_after_solo"); });
+
+        // ── 전압을 고르지 않고 떠남: 무입력 시간이 지나면 기록 없이 대기화면으로 돌아가고 회차도 끝나야 한다 ──
+        t += 1f;
+        int recordsBefore = 0;
+        Add(t, "leave_start_w1", () => { recordsBefore = Session(1).Ranking.Count; Session(1).StartExperience(); }, () => GameRound.Instance.Current == GameRound.Phase.Idle);
+        run = t + c.joinWaitSeconds + c.readySeconds + c.guideSeconds + c.countdownSeconds;
+        Add(run + c.runSeconds + 0.5f, "leave_voltage", () => c.idleTimeoutSeconds = 3f, () => Session(1).Current == WheelSession.State.SelectVoltage);
+        t = run + c.runSeconds + 0.5f + 4f;
+        Add(t, "leave_idle", () =>
+        {
+            bool ok = Session(1).Current == WheelSession.State.Idle && GameRound.Instance.Current == GameRound.Phase.Idle && Session(1).Ranking.Count == recordsBefore;
+            Log($"  [leave] 무입력 복귀 {(ok ? "정상" : "실패")} - 기록 수 {recordsBefore} → {Session(1).Ranking.Count}");
+        });
         Add(t + 0.5f, "finish", Finish);
 
         startTime = EditorApplication.timeSinceStartup;
@@ -117,7 +135,11 @@ public static class PowerPlayTest
         Log("시험 시작");
     }
 
-    private static void Add(float at, string name, Action action) => steps.Add(new Step { at = at, name = name, action = action });
+    private static void Add(float at, string name, Action action, Func<bool> until = null) => steps.Add(new Step { at = at, name = name, action = action, until = until });
+
+    // 조건을 기다리는 최대 시간(초). 넘으면 실패로 남기고 그대로 진행한다.
+    private const float MaxWaitSeconds = 30f;
+    private static double waitStart = -1;
 
     private static void Tick()
     {
@@ -140,7 +162,19 @@ public static class PowerPlayTest
 
         while (nextStep < steps.Count && elapsed >= steps[nextStep].at)
         {
-            Step s = steps[nextStep++];
+            Step s = steps[nextStep];
+            if (s.until != null && !s.until())
+            {
+                if (waitStart < 0) waitStart = now;
+                if (now - waitStart < MaxWaitSeconds)
+                {
+                    startTime = now - s.at;   // 시험 시계를 이 단계에 멈춰 둔다
+                    break;
+                }
+                Log($"{s.name}: 대기 조건이 {MaxWaitSeconds}s 안에 맞지 않음 (실패) - {StateLine()}");
+            }
+            waitStart = -1;
+            nextStep++;
             try
             {
                 s.action();
