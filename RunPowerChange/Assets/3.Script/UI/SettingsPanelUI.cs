@@ -20,8 +20,14 @@ using UnityEngine.UI;
 // [숫자 설정을 추가하는 방법] (Setting.json = GameDynamicData 의 float/int 필드)
 //  1) 씬의 설정창에 TMP_InputField 를 하나 만든다.
 //  2) 아래 numberSettings 목록에 (필드 이름, InputField, 최소/최대)를 연결한다.
-//     목록 안의 값은 경로로 적는다 (예: voltages[1].facilityCostWon, wheels[0].displayIndex).
+//     목록 안의 값은 경로로 적는다 (예: voltages[1].facilityCostWon, voltages[0].lossRate).
 // 입력을 마치면 범위를 맞춰 persistentDataPath/Setting.json 에 바로 저장한다.
+//
+// [출력 디스플레이 선택을 추가하는 방법] (모니터를 여러 대 쓰는 화면마다 1개)
+//  1) 씬의 설정창에 TMP_Dropdown 을 하나 만든다 (옵션은 비워 둔다. 연결된 디스플레이로 채운다).
+//  2) 아래 displaySettings 목록에 (디스플레이 번호 int 필드 경로, Dropdown)을 연결한다 (예: wheels[0].displayIndex).
+//  3) 그 화면의 캔버스·카메라가 DisplayRouting.Changed 를 받아 targetDisplay 를 다시 맞추게 한다.
+// 디스플레이가 1대뿐이면 이 줄들은 숨긴다. 고르면 저장하고 재시작 없이 바로 옮긴다.
 public class SettingsPanelUI : MonoBehaviour
 {
     // Setting.json 의 숫자 필드 1개와 씬의 InputField 1개를 연결하는 항목.
@@ -51,6 +57,20 @@ public class SettingsPanelUI : MonoBehaviour
         [NonSerialized] public UnityAction<bool> handler;
     }
 
+    // Setting.json 의 디스플레이 번호(int, 0 = Display 1) 필드 1개와 씬의 Dropdown 1개를 연결하는 항목.
+    [Serializable]
+    public class DisplaySetting
+    {
+        [Tooltip("GameDynamicData 안의 int 필드 경로 (예: wheels[0].displayIndex, spectatorDisplayIndex)")]
+        public string fieldName;
+        public TMP_Dropdown dropdown;
+        [Tooltip("디스플레이가 1대뿐일 때 숨길 줄. 비워두면 Dropdown 의 부모를 숨긴다.")]
+        public GameObject row;
+
+        [NonSerialized] public FieldInfo field;
+        [NonSerialized] public UnityAction<int> handler;
+    }
+
     // 스타트팩이 기본으로 즉시 반영해 주는 설정 필드 이름
     private const string UseUnityOnTopField = "useUnityOnTop";
     private const string ShowMouseCursorField = "showMouseCursor";
@@ -67,6 +87,9 @@ public class SettingsPanelUI : MonoBehaviour
 
     [Header("숫자 설정 (Setting.json 의 float/int 필드)")]
     [SerializeField] private List<NumberSetting> numberSettings = new List<NumberSetting>();
+
+    [Header("출력 디스플레이 선택 (Setting.json 의 int 디스플레이 번호, 모니터가 여러 대일 때만 보임)")]
+    [SerializeField] private List<DisplaySetting> displaySettings = new List<DisplaySetting>();
 
     [Header("적용 대상 (비워두면 자동 탐색)")]
     [SerializeField] private UnityAlwaysOnTop alwaysOnTop;
@@ -93,6 +116,7 @@ public class SettingsPanelUI : MonoBehaviour
 
         BindFields();
         BindNumberFields();
+        BindDisplayFields();
         SyncFromData();
 
         foreach (var setting in numberSettings)
@@ -102,6 +126,15 @@ public class SettingsPanelUI : MonoBehaviour
             var captured = setting;
             captured.handler = text => OnNumberEdited(captured, text);
             captured.input.onEndEdit.AddListener(captured.handler);
+        }
+
+        foreach (var setting in displaySettings)
+        {
+            if (setting == null || setting.field == null || setting.dropdown == null) continue;
+
+            var captured = setting;
+            captured.handler = index => OnDisplaySelected(captured, index);
+            captured.dropdown.onValueChanged.AddListener(captured.handler);
         }
 
         foreach (var setting in boolSettings)
@@ -139,6 +172,14 @@ public class SettingsPanelUI : MonoBehaviour
             if (setting == null || setting.input == null || setting.handler == null) continue;
 
             setting.input.onEndEdit.RemoveListener(setting.handler);
+            setting.handler = null;
+        }
+
+        foreach (var setting in displaySettings)
+        {
+            if (setting == null || setting.dropdown == null || setting.handler == null) continue;
+
+            setting.dropdown.onValueChanged.RemoveListener(setting.handler);
             setting.handler = null;
         }
     }
@@ -243,7 +284,80 @@ public class SettingsPanelUI : MonoBehaviour
             object owner = ResolveOwner(jm.gameDynamicData, setting.fieldName);
             if (owner != null) setting.input.SetTextWithoutNotify(FormatNumber(setting.field.GetValue(owner)));
         }
+        foreach (var setting in displaySettings)
+        {
+            if (setting == null || setting.dropdown == null) continue;
+            var row = setting.row != null ? setting.row : setting.dropdown.transform.parent.gameObject;
+            row.SetActive(DisplayRouting.IsMulti);
+            if (setting.field == null || jm.gameDynamicData == null) continue;
+            object owner = ResolveOwner(jm.gameDynamicData, setting.fieldName);
+            if (owner != null) FillDisplayOptions(setting.dropdown, Mathf.Max(0, (int)setting.field.GetValue(owner)));
+        }
         _syncing = false;
+    }
+
+    // 연결된 디스플레이 목록으로 옵션을 채운다. 저장된 번호의 모니터가 빠져 있어도 그 값이 보이도록 끝까지 넣는다.
+    private static void FillDisplayOptions(TMP_Dropdown dropdown, int current)
+    {
+        var options = new List<string>();
+        int count = Mathf.Max(DisplayRouting.Count, current + 1);
+        for (int i = 0; i < count; i++) options.Add(DisplayRouting.Label(i));
+        dropdown.ClearOptions();
+        dropdown.AddOptions(options);
+        dropdown.SetValueWithoutNotify(current);
+        dropdown.RefreshShownValue();
+    }
+
+    // 인스펙터에 적은 경로를 GameDynamicData 의 int 디스플레이 번호 필드와 연결한다.
+    private void BindDisplayFields()
+    {
+        var data = JsonManager.instance != null ? JsonManager.instance.gameDynamicData : new GameDynamicData();
+        foreach (var setting in displaySettings)
+        {
+            if (setting == null) continue;
+            setting.field = null;
+
+            object owner = string.IsNullOrEmpty(setting.fieldName) ? null : ResolveOwner(data, setting.fieldName);
+            var field = owner == null ? null : owner.GetType().GetField(LastName(setting.fieldName), BindingFlags.Public | BindingFlags.Instance);
+            if (field == null)
+            {
+                Debug.LogError($"[Settings] GameDynamicData 에 '{setting.fieldName}' 필드가 없습니다.", this);
+                continue;
+            }
+            if (field.FieldType != typeof(int))
+            {
+                Debug.LogError($"[Settings] '{setting.fieldName}' 은 int 가 아니라 {field.FieldType.Name} 입니다. 디스플레이 번호로 다룰 수 없습니다.", this);
+                continue;
+            }
+            if (setting.dropdown == null)
+            {
+                Debug.LogWarning($"[Settings] '{setting.fieldName}' 에 연결된 Dropdown 이 없습니다.", this);
+                continue;
+            }
+
+            setting.field = field;
+        }
+    }
+
+    private void OnDisplaySelected(DisplaySetting setting, int index)
+    {
+        if (_syncing) return;
+
+        var jm = JsonManager.instance;
+        if (jm == null || setting.field == null) return;
+
+        object target = ResolveOwner(jm.gameDynamicData, setting.fieldName);
+        if (target == null)
+        {
+            Debug.LogWarning($"[Settings] '{setting.fieldName}' 항목을 찾지 못함 (목록 길이 확인)", this);
+            return;
+        }
+        setting.field.SetValue(target, index);
+        jm.SaveGameDynamicData();               // persistentDataPath/Setting.json 에 바로 저장
+        DisplayRouting.Apply(index);            // 그 화면의 캔버스·카메라를 바로 옮긴다
+
+        Debug.Log($"[Settings] {setting.fieldName} = {index} (Display {index + 1})");
+        OnNumberChanged?.Invoke(setting.fieldName, index);
     }
 
     // 인스펙터에 적은 필드 이름을 GameDynamicData 의 float/int 필드와 연결한다.

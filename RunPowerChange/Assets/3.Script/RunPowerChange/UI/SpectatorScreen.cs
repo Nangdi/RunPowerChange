@@ -45,7 +45,8 @@ public class SpectatorScreen : MonoBehaviour
 
     private void Start()
     {
-        if (canvas != null) canvas.targetDisplay = Mathf.Max(0, Config.spectatorDisplayIndex);
+        ApplyDisplay();
+        DisplayRouting.Changed += ApplyDisplay;
         foreach (var s in sessions)
             if (s != null) s.OnRecordAdded += HandleRecordAdded;
         bottomTime = Time.unscaledTime;
@@ -88,8 +89,14 @@ public class SpectatorScreen : MonoBehaviour
         }
     }
 
+    private void ApplyDisplay()
+    {
+        if (canvas != null) canvas.targetDisplay = Mathf.Max(0, Config.spectatorDisplayIndex);
+    }
+
     private void OnDestroy()
     {
+        DisplayRouting.Changed -= ApplyDisplay;
         foreach (var s in sessions)
             if (s != null) s.OnRecordAdded -= HandleRecordAdded;
     }

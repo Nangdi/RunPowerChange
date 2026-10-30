@@ -21,8 +21,18 @@ public class RaceCamera : MonoBehaviour
         var cam = GetComponent<Camera>();
         if (cam == null) return;
 
-        cam.targetDisplay = DisplayIndex(cam);
+        ApplyDisplay();
+        DisplayRouting.Changed += ApplyDisplay;
         if (!keepCullingMask) cam.cullingMask = CullingMask();
+    }
+
+    private void OnDestroy() => DisplayRouting.Changed -= ApplyDisplay;
+
+    // 설정창에서 디스플레이를 바꾸면 다시 불린다
+    private void ApplyDisplay()
+    {
+        var cam = GetComponent<Camera>();
+        if (cam != null) cam.targetDisplay = DisplayIndex(cam);
     }
 
     private int DisplayIndex(Camera cam)

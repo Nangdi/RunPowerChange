@@ -3,7 +3,7 @@ using UnityEngine;
 // 쳇바퀴 1대의 32형 터치모니터 화면. Canvas_Wheel 프리팹 루트에 붙는다.
 // 연결된 WheelSession 의 상태에 맞춰 패널을 켜고 끈다.
 // 대기 중(Idle)인데 옆 쳇바퀴가 먼저 시작해 합류할 수 있으면 대기화면 대신 참가 대기(참여하기) 화면을 보여 준다.
-// 캔버스 출력 디스플레이는 Setting.json wheels[].displayIndex 를 따른다.
+// 캔버스 출력 디스플레이는 Setting.json wheels[].displayIndex 를 따른다. 설정창에서 바꾸면 바로 옮긴다 (DisplayRouting).
 public class WheelScreen : MonoBehaviour
 {
     [Tooltip("이 화면이 보여줄 쳇바퀴 세션 (씬 인스턴스에서 연결)")]
@@ -49,8 +49,11 @@ public class WheelScreen : MonoBehaviour
         }
 
         ApplyDisplay();
+        DisplayRouting.Changed += ApplyDisplay;
         Refresh();
     }
+
+    private void OnDestroy() => DisplayRouting.Changed -= ApplyDisplay;
 
     private void Update()
     {
