@@ -7,6 +7,7 @@ using UnityEngine;
 
 // 플레이 모드 자동 시험 (개발용). 센서 회전 신호를 흉내 내며 2인 경주 → 1인(1위 고스트) 체험을 끝까지 진행하고,
 // 화면마다 3D 장면 + UI 를 합친 캡처와 점검 결과를 outDir 에 남긴다.
+// 랭킹·달리기 기록은 빈 상태로 시험하고, 끝나면 시험 전 파일로 되돌린다 (실제 랭킹에 시험 기록이 남지 않음).
 //  PowerPlayTest.Start(outDir)  → 플레이 모드에 들어가 시험을 시작한다. 끝나면 outDir/done.txt 를 쓰고 플레이 모드를 끈다.
 // 에디터 창에 포커스가 없어도 진행되도록 EditorApplication.update 로 돈다 (PlayerSettings.runInBackground 가 켜져 있어야 함).
 [InitializeOnLoad]
@@ -32,10 +33,45 @@ public static class PowerPlayTest
     private static readonly float[] speedKmh = new float[3];
     private static readonly double[] nextRotation = new double[3];
 
+    // 시험이 남기는 랭킹·달리기 기록이 실제 기록에 섞이지 않도록, 시작 전에 기록 파일을 떼어 두고 빈 기록으로 시험한 뒤
+    // 플레이 모드가 끝나면(시험 완료든 중간에 멈춤이든) 원래 파일로 되돌린다.
+    private const string BackupKey = "PowerPlayTest.RecordBackup";
+    private static string BackupDir => Path.Combine(Application.temporaryCachePath, "PowerPlayTestRecords");
+
+    private static IEnumerable<string> RecordFiles()
+    {
+        string dir = Application.persistentDataPath;
+        if (!Directory.Exists(dir)) yield break;
+        foreach (var f in Directory.GetFiles(dir, "ranking_wheel*.json")) yield return f;
+        string race = Path.Combine(dir, "race_records.json");
+        if (File.Exists(race)) yield return race;
+    }
+
+    private static void BackupRecords()
+    {
+        if (SessionState.GetBool(BackupKey, false)) RestoreRecords();   // 지난 시험이 되돌리지 못한 백업이 있으면 먼저 되돌린다
+        if (Directory.Exists(BackupDir)) Directory.Delete(BackupDir, true);
+        Directory.CreateDirectory(BackupDir);
+        foreach (var f in new List<string>(RecordFiles())) File.Move(f, Path.Combine(BackupDir, Path.GetFileName(f)));
+        SessionState.SetBool(BackupKey, true);
+    }
+
+    private static void RestoreRecords()
+    {
+        if (!SessionState.GetBool(BackupKey, false)) return;
+        foreach (var f in new List<string>(RecordFiles())) File.Delete(f);
+        if (Directory.Exists(BackupDir))
+            foreach (var f in Directory.GetFiles(BackupDir)) File.Move(f, Path.Combine(Application.persistentDataPath, Path.GetFileName(f)));
+        SessionState.EraseBool(BackupKey);
+        Debug.Log("[PlayTest] 랭킹·달리기 기록을 시험 전으로 되돌림");
+    }
+
     static PowerPlayTest()
     {
+        if (!EditorApplication.isPlayingOrWillChangePlaymode) EditorApplication.delayCall += RestoreRecords;
         EditorApplication.playModeStateChanged += state =>
         {
+            if (state == PlayModeStateChange.EnteredEditMode) RestoreRecords();
             if (state != PlayModeStateChange.EnteredPlayMode) return;
             string dir = SessionState.GetString(PendingKey, "");
             if (string.IsNullOrEmpty(dir)) return;
@@ -49,6 +85,7 @@ public static class PowerPlayTest
         Directory.CreateDirectory(dir);
         foreach (var f in Directory.GetFiles(dir)) File.Delete(f);
         PlayerSettings.runInBackground = true;
+        BackupRecords();
         SessionState.SetString(PendingKey, dir);
         EditorApplication.isPlaying = true;
     }
