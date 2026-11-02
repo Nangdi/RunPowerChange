@@ -13,6 +13,8 @@ public class GameSettingData
     public bool useUnityOnTop;
     // 마우스 커서 표시 여부. false면 커서를 숨긴다(키오스크/전시용).
     public bool showMouseCursor;
+    // 보조 모니터 터치 위치 보정 (Unity 2022.3.60 이하 Windows 버그 우회, WindowsTouchInput). 끄면 Unity 터치를 그대로 쓴다.
+    public bool useWindowsTouchFix = true;
 }
 
 // 쳇바퀴 1대의 장치·화면 연결.
