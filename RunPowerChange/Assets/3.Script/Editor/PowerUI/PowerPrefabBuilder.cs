@@ -18,9 +18,10 @@ using static PowerUIKit;
 //      ├ StaticLayer  : 정적 PNG 한 장 (4.Sprite/Static/Static_xxx.png, 배경 투명 - 뒤에 3D 경주 장면)
 //      └ 동적 요소    : 버튼, 숫자 글자, 게이지, 순서대로 나타나는 카드
 //  Canvas_Spectator.prefab (SpectatorScreen)  85형 세로. 씬에 1개
-//   └ Frame (2160x3840) └ Panel_Spectator.prefab (상태·발전량 글자, 오늘 최고 랭킹 표시, 아래 칸 3개)
+//   └ Frame (2160x3840) └ Panel_Spectator.prefab (상태·발전량 글자, 오늘 최고 랭킹 표시, 아래 칸 3개, 안내 카드·카운트다운 Notice)
 //
 // 이미 있는 프리팹은 덮어쓰지 않는다. 직접 수정한 프리팹을 지키기 위해서다.
+// (뒤에 추가된 85형 안내 카드는 예외로, 예전 프리팹에 없으면 그 부분만 덧붙인다: EnsureSpectatorNotice)
 // 구조가 바뀌어 처음부터 다시 만들려면 BuildAll(rebuild: true) 를 쓴다 (같은 경로에 덮어써서 GUID 유지).
 public static class PowerPrefabBuilder
 {
@@ -64,6 +65,7 @@ public static class PowerPrefabBuilder
             screen = SpectatorResolution;
             GameObject spectatorPanel = GetOrCreate(PanelPrefabPath(SpectatorName), CreateSpectatorPanel);
             GameObject spectatorPrefab = GetOrCreate(SpectatorPrefabPath, () => CreateSpectatorCanvas(spectatorPanel));
+            EnsureSpectatorNotice();
             screen = ReferenceResolution;
 
             ApplyToScene(canvasPrefab);
@@ -527,8 +529,115 @@ public static class PowerPrefabBuilder
         PartImage((RectTransform)info2.transform, "Board", "Spectator_Info_2");
         info2.alpha = 0f;
 
+        CreateSpectatorNotice(panel);
+
         // SpectatorScreen(캔버스 루트)이 위 이름으로 연결한다
         return panel.gameObject;
+    }
+
+    // 85형 가운데 아래 안내 카드 + 가운데 카운트다운 (SpectatorNotice). 패널 맨 위(마지막 자식)에 둔다.
+    // 디자이너 시안에 없는 화면이라 32형 체험 안내 카드·STEP 배지 모양의 임시 그림(Tools/make_spectator_notice_parts.py)으로 만든다.
+    // 카드는 아래 칸(PSD y 3068~) 위, 3D 바퀴 아래의 트랙 자리(PSD y 약 2340~3020)에 둬서 바퀴를 가리지 않는다.
+    private static SpectatorNotice CreateSpectatorNotice(RectTransform panel)
+    {
+        RectTransform root = StretchFull(CreateRect("Notice", panel));
+        var view = root.gameObject.AddComponent<SpectatorNotice>();
+
+        // 카운트다운: 32형과 같은 디자이너 숫자 그림을 3D 트랙 가운데에 크게
+        Vector2 countPos = new Vector2(0f, 260f);
+        const float countScale = 1.8f;
+        var numbers = new List<UnityEngine.Object>();
+        foreach (string n in new[] { "Count_1", "Count_2", "Count_3" })
+        {
+            Sprite sprite = Part(n);
+            Image image = AddSprite(Place(CreateRect(n, root), countPos, SpriteSize(sprite) * countScale), sprite);
+            image.preserveAspect = true;
+            image.gameObject.SetActive(false);
+            numbers.Add(image.rectTransform);
+        }
+        Sprite goSprite = Part("Count_Go");
+        Image go = AddSprite(Place(CreateRect("Count_Go", root), countPos, SpriteSize(goSprite) * countScale), goSprite);
+        go.preserveAspect = true;
+        go.gameObject.SetActive(false);
+
+        // 안내 카드
+        RectTransform cardRt = Place(CreateRect("Group_Card", root), new Vector2(0f, -760f), new Vector2(1880f, 680f));
+        CanvasGroup card = cardRt.gameObject.AddComponent<CanvasGroup>();
+        card.interactable = false;
+        card.blocksRaycasts = false;
+        Image background = AddSprite(StretchFull(CreateRect("Background", cardRt)), Part("Spectator_NoticeCard"));
+        background.type = Image.Type.Sliced;
+        Image pill = AddSprite(Place(CreateRect("Pill", cardRt), new Vector2(0f, 222f), new Vector2(560f, 100f)), Part("Spectator_NoticePill"));
+        pill.type = Image.Type.Sliced;
+        TMP_Text tag = OneLine(CreateText(pill.rectTransform, "Label", "참가자 모집", Vector2.zero, new Vector2(500f, 90f), 54f, WhiteColor, Weight.SemiBold), 36f);
+        TMP_Text title = OneLine(CreateText(cardRt, "Title", "함께 달릴 참가자를 모집 중입니다!", new Vector2(0f, 75f), new Vector2(1720f, 140f),
+            104f, TextColor, Weight.ExtraBold), 60f);
+        TextMeshProUGUI sub = CreateText(cardRt, "Sub", "비어 있는 쳇바퀴 화면에서 참여하기를 누르면\n같이 달릴 수 있어요", new Vector2(0f, -92f), new Vector2(1720f, 180f),
+            60f, TextColor, Weight.Medium);
+        sub.enableAutoSizing = true;
+        sub.fontSizeMin = 40f;
+        sub.fontSizeMax = 60f;
+        TMP_Text count = OneLine(CreateText(cardRt, "Count", "12초", new Vector2(0f, -248f), new Vector2(600f, 100f), 84f, OrangeColor, Weight.ExtraBold), 50f);
+
+        Wire(view, ("card", card), ("tagText", tag), ("titleText", title), ("subText", sub), ("countText", count), ("go", go.rectTransform));
+        WireList(view, "numbers", numbers);
+        var so = new SerializedObject(view);
+        SerializedProperty colors = so.FindProperty("playerColors");
+        colors.arraySize = 2;
+        colors.GetArrayElementAtIndex(0).colorValue = Player1Color;
+        colors.GetArrayElementAtIndex(1).colorValue = Player2Color;
+        so.ApplyModifiedPropertiesWithoutUndo();
+        return view;
+    }
+
+    private static Vector2 SpriteSize(Sprite sprite) => sprite != null ? sprite.rect.size : new Vector2(400f, 400f);
+
+    // 한 줄 글자: 넘치면 자동 축소
+    private static TMP_Text OneLine(TextMeshProUGUI text, float minSize)
+    {
+        text.enableWordWrapping = false;
+        text.overflowMode = TextOverflowModes.Overflow;
+        text.enableAutoSizing = true;
+        text.fontSizeMin = minSize;
+        text.fontSizeMax = text.fontSize;
+        return text;
+    }
+
+    // 예전에 만든 85형 프리팹에 안내 카드가 없으면 덧붙이고 SpectatorScreen 에 연결한다 (프리팹을 새로 만들지 않아 다른 수정은 그대로 둔다)
+    private static void EnsureSpectatorNotice()
+    {
+        string panelPath = PanelPrefabPath(SpectatorName);
+        GameObject panelRoot = PrefabUtility.LoadPrefabContents(panelPath);
+        try
+        {
+            if (panelRoot.GetComponentInChildren<SpectatorNotice>(true) == null)
+            {
+                CreateSpectatorNotice((RectTransform)panelRoot.transform);
+                PrefabUtility.SaveAsPrefabAsset(panelRoot, panelPath);
+                Debug.Log($"85형 안내 카드 추가: {panelPath}");
+            }
+        }
+        finally
+        {
+            PrefabUtility.UnloadPrefabContents(panelRoot);
+        }
+
+        GameObject canvasRoot = PrefabUtility.LoadPrefabContents(SpectatorPrefabPath);
+        try
+        {
+            var view = canvasRoot.GetComponent<SpectatorScreen>();
+            var notice = canvasRoot.GetComponentInChildren<SpectatorNotice>(true);
+            if (view != null && notice != null && new SerializedObject(view).FindProperty("notice").objectReferenceValue != notice)
+            {
+                Wire(view, ("notice", notice));
+                PrefabUtility.SaveAsPrefabAsset(canvasRoot, SpectatorPrefabPath);
+                Debug.Log($"85형 안내 카드 연결: {SpectatorPrefabPath}");
+            }
+        }
+        finally
+        {
+            PrefabUtility.UnloadPrefabContents(canvasRoot);
+        }
     }
 
     private static GameObject CreateSpectatorCanvas(GameObject panelPrefab)
@@ -556,7 +665,8 @@ public static class PowerPrefabBuilder
             ("canvas", canvas),
             ("recordTag", Find<RectTransform>("RecordTag")),
             ("energyTable", Find<RankTableView>("Bottom_1_Ranking/Table_Energy")),
-            ("saleTable", Find<RankTableView>("Bottom_1_Ranking/Table_Sale")));
+            ("saleTable", Find<RankTableView>("Bottom_1_Ranking/Table_Sale")),
+            ("notice", Find<SpectatorNotice>("Notice")));
         WireList(screenView, "statusTexts", new UnityEngine.Object[] { Find<TMP_Text>("Status_1"), Find<TMP_Text>("Status_2") });
         WireList(screenView, "energyTexts", new UnityEngine.Object[] { Find<TMP_Text>("Energy_1"), Find<TMP_Text>("Energy_2") });
         WireList(screenView, "bottomGroups", new UnityEngine.Object[]

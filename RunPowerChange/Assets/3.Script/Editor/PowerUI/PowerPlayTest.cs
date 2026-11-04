@@ -106,6 +106,7 @@ public static class PowerPlayTest
         var c = Cfg;
         c.joinWaitSeconds = 3f; c.readySeconds = 1.5f; c.guideSeconds = 2f; c.countdownSeconds = 3; c.runSeconds = 24f;
         c.saleSeconds = 4f; c.saleStepSeconds = 0.4f; c.resultAutoCloseSeconds = 3f; c.finishApproachSeconds = 8f; c.idleTimeoutSeconds = 30f;
+        c.spectatorWinnerSeconds = 3f; c.spectatorRankingSeconds = 4f;
 
         // ── 2인 경주: 쳇바퀴 1 이 빠르고(14km/h) 2 가 느리다(9km/h) ──
         // 시각: 1.0 쳇바퀴1 시작(Open) → 2.2 쳇바퀴2 참여(전원 → Ready) → 준비·안내·카운트다운 → 달리기
@@ -120,14 +121,19 @@ public static class PowerPlayTest
         float guide = 2.2f + c.readySeconds;
         float count = guide + c.guideSeconds;
         float run = count + c.countdownSeconds;
-        Add(2.2f + c.readySeconds * 0.5f, "duo_ready", () => Capture("03_ready_w1", 1));
-        Add(guide + c.guideSeconds * 0.5f, "duo_guide", () => Capture("04_guide_w1", 1));
+        Add(2.2f + c.readySeconds * 0.5f, "duo_ready", () => { Capture("03_ready_w1", 1); });
+        Add(guide + c.guideSeconds * 0.5f, "duo_guide", () => { Capture("04_guide_w1", 1); });
         Add(count + 0.3f, "duo_count", () => { Capture("05_count_w1", 1); speedKmh[1] = 14f; speedKmh[2] = 9f; });
         float t;
         Add(run + 1f, "duo_run_1s", () => { Capture("06_run_1s_w1", 1); Capture("06_run_1s_w2", 2); });
         Add(run + 8f, "duo_run_8s", () => { Capture("07_run_8s_w1", 1); Capture("07_run_8s_w2", 2); CaptureSpectator("07_spectator_run"); Check("run8"); });
         Add(run + 18f, "duo_run_18s", () => { Capture("08_run_finish_w1", 1); Check("run18"); });
-        Add(run + c.runSeconds + 0.5f, "duo_voltage", () => { speedKmh[1] = speedKmh[2] = 0f; Capture("09_voltage_w1", 1); });
+        // 긴 프레임 멈춤 점검: 달리기 끝 3초 전에 에디터를 12초 멈춘다 (현장 PC 순간 멈춤 흉내).
+        // 멈춘 뒤 첫 프레임에 달리기가 끝나도, 두 쳇바퀴 모두 남은 체험 시간만큼만 발전량이 더해져야 한다 (스크립트 실행 순서와 무관).
+        Add(run + 20f, "duo_hitch", () => System.Threading.Thread.Sleep(12000),
+            () => GameRound.Instance.Current == GameRound.Phase.Run && GameRound.Instance.RunRemaining <= 3f);
+        Add(run + c.runSeconds + 0.5f, "duo_voltage", () => { speedKmh[1] = speedKmh[2] = 0f; Capture("09_voltage_w1", 1); LogRanks("voltage"); CheckEnergyRatio(); },
+            () => Session(1).Current == WheelSession.State.SelectVoltage && Session(2).Current == WheelSession.State.SelectVoltage);
         Add(run + c.runSeconds + 1.5f, "duo_select", () => { Session(1).SelectVoltage(1); Session(2).SelectVoltage(0); },
             () => Session(1).Current == WheelSession.State.SelectVoltage && Session(2).Current == WheelSession.State.SelectVoltage);
         // 판매 금액 슬롯: 도는 중 / 일부 자리 멈춤 / 다 맞춰짐
@@ -135,7 +141,7 @@ public static class PowerPlayTest
         Add(slot + 0.15f, "slot_spin", () => Capture("10a_slot_spin_w1", 1));
         Add(slot + SaleSlot.Duration(c) * 0.6f, "slot_partial", () => Capture("10b_slot_partial_w1", 1));
         Add(slot + SaleSlot.Duration(c) + 0.2f, "duo_sale", () => { Capture("10_sale_w1", 1); Capture("10_sale_w2", 2); });
-        Add(run + c.runSeconds + 1.5f + c.saleSeconds + 1f, "duo_ranking", () => { Capture("11_ranking_w1", 1); CaptureSpectator("11_spectator_post"); });
+        Add(run + c.runSeconds + 1.5f + c.saleSeconds + 1f, "duo_ranking", () => { Capture("11_ranking_w1", 1); Capture("11_ranking_w2", 2); CaptureSpectator("11_spectator_ranking"); LogRanks("ranking"); });
         t = run + c.runSeconds + 1.5f + c.saleSeconds + c.resultAutoCloseSeconds + 1.5f;
         Add(t, "duo_idle", () => { Capture("12_idle_after_w1", 1); CaptureSpectator("12_spectator_idle"); Check("idle_after_duo"); });
 
@@ -146,7 +152,7 @@ public static class PowerPlayTest
         Add(count + 0.3f, "solo_count", () => speedKmh[2] = 11f);
         run = count + c.countdownSeconds;
         Add(run + 6f, "solo_run", () => { Capture("13_solo_run_w2", 2); Capture("14_solo_busy_w1", 1); CaptureSpectator("13_spectator_solo"); Check("solo_run"); });
-        Add(run + c.runSeconds + 0.5f, "solo_end", () => { speedKmh[2] = 0f; Session(2).SelectVoltage(1); },
+        Add(run + c.runSeconds + 0.5f, "solo_end", () => { speedKmh[2] = 0f; Session(2).SelectVoltage(1); LogRanks("solo"); },
             () => Session(2).Current == WheelSession.State.SelectVoltage);
         t = run + c.runSeconds + 0.5f + c.saleSeconds + c.resultAutoCloseSeconds + 1.5f;
         Add(t, "solo_idle", () => { CaptureSpectator("15_spectator_idle"); Check("idle_after_solo"); });
@@ -164,6 +170,13 @@ public static class PowerPlayTest
             Log($"  [leave] 무입력 복귀 {(ok ? "정상" : "실패")} - 기록 수 {recordsBefore} → {Session(1).Ranking.Count}");
         });
         Add(t + 0.5f, "finish", Finish);
+
+        watchPhase = (GameRound.Phase)(-1);
+        watchRound = 0;
+        watchShot.Clear();
+        revealAt = -1f;
+        SpectatorScreen.RankingRevealed -= HandleRankingRevealed;
+        SpectatorScreen.RankingRevealed += HandleRankingRevealed;
 
         startTime = EditorApplication.timeSinceStartup;
         nextRotation[1] = nextRotation[2] = startTime;
@@ -188,14 +201,23 @@ public static class PowerPlayTest
         double now = EditorApplication.timeSinceStartup;
         float elapsed = (float)(now - startTime);
 
-        // 센서 회전 신호 흉내: 1회전 거리 / 속도 마다 신호 1개
+        // 센서 회전 신호 흉내: 신호 1개 게임 거리(둘레 / pulsesPerRotation × 속도 배율) / 화면 속도 마다 신호 1개
         for (int id = 1; id <= 2; id++)
         {
             if (speedKmh[id] <= 0f || now < nextRotation[id]) { if (speedKmh[id] <= 0f) nextRotation[id] = now; continue; }
             var sensor = WheelSensorLink.Link != null ? WheelSensorLink.Link.GetSensor(id) : null;
-            sensor?.ApplyRotation(Time.unscaledTime, Cfg);
-            nextRotation[id] = now + Cfg.wheelCircumferenceM / (speedKmh[id] / 3.6f);
+            // 다음 시각을 '지금 + 간격'으로 잡으면 업데이트 주기만큼 간격이 늘어 속도가 낮게 나온다.
+            // 예정 시각에 간격을 더해 가고, 업데이트가 늦어 밀린 신호는 실제 수신처럼 한 번에 보낸다.
+            float interval = Cfg.GameDistancePerPulseM / (speedKmh[id] / 3.6f);
+            if (now - nextRotation[id] > 0.5) nextRotation[id] = now;   // 캡처 등으로 크게 멈췄으면 몰아서 보내지 않는다
+            while (now >= nextRotation[id])
+            {
+                sensor?.ApplyPulse(Time.unscaledTime, Cfg);
+                nextRotation[id] += interval;
+            }
         }
+
+        WatchSpectator();
 
         while (nextStep < steps.Count && elapsed >= steps[nextStep].at)
         {
@@ -222,6 +244,100 @@ public static class PowerPlayTest
                 Log($"{s.name}: 오류 {e.Message}");
             }
         }
+    }
+
+    // 85형 관전 화면은 시험 시간표가 아니라 회차 단계가 바뀐 시점을 기준으로 찍는다 (플레이 모드 진입·캡처로 진행이 밀려도 안내 카드를 놓치지 않게).
+    // 단계마다 들어간 지 0.6초 뒤 1장, 경기 결과(Post)는 승자 발표·결과 집계·종합 순위 발표를 각각 1장.
+    private static GameRound.Phase watchPhase = (GameRound.Phase)(-1);
+    private static float watchEnter;
+    private static int watchEnterFrame;
+    private static int revealFrame;
+    // 캡처 전에 지나야 하는 게임 프레임 수. 긴 멈춤 뒤에는 시간은 지나도 프레임이 1~2번뿐이라 카드 페이드인이 안 끝난 모습이 찍힌다.
+    private const int SettleFrames = 10;
+    private static int watchRound;
+    private static readonly HashSet<string> watchShot = new HashSet<string>();
+    private static float revealAt = -1f;
+
+    private static void WatchSpectator()
+    {
+        var r = GameRound.Instance;
+        if (r == null) return;
+        float now = Time.unscaledTime;
+        if (r.Current != watchPhase)
+        {
+            watchPhase = r.Current;
+            watchEnter = now;
+            watchEnterFrame = Time.frameCount;
+            if (r.Current == GameRound.Phase.Open)
+            {
+                watchRound++;
+                revealAt = -1f;
+            }
+        }
+        float e = Time.frameCount - watchEnterFrame >= SettleFrames ? now - watchEnter : 0f;
+        string prefix = $"s{watchRound}_";
+        switch (r.Current)
+        {
+            case GameRound.Phase.Open:
+            case GameRound.Phase.Ready:
+            case GameRound.Phase.Guide:
+                ShotOnce(e >= 0.6f, prefix + r.Current.ToString().ToLower());
+                break;
+            case GameRound.Phase.Countdown:
+                ShotOnce(e >= 0.25f, prefix + "count");
+                break;
+            case GameRound.Phase.Run:
+                ShotOnce(e >= 0.3f, prefix + "go");
+                break;
+            case GameRound.Phase.Post:
+                ShotOnce(e >= 0.6f, prefix + "post_winner");
+                ShotOnce(e >= Cfg.spectatorWinnerSeconds + 0.6f && revealAt < 0f, prefix + "post_tally");
+                break;
+        }
+        ShotOnce(revealAt >= 0f && now - revealAt >= 0.6f && Time.frameCount - revealFrame >= SettleFrames, prefix + "post_ranking");
+    }
+
+    private static void ShotOnce(bool when, string name)
+    {
+        if (!when || !watchShot.Add(name)) return;
+        CaptureSpectator(name);
+        var notice = UnityEngine.Object.FindObjectOfType<SpectatorNotice>(true);
+        string card = "-";
+        if (notice != null)
+        {
+            var so = new SerializedObject(notice);
+            var group = (CanvasGroup)so.FindProperty("card").objectReferenceValue;
+            var title = (TMPro.TMP_Text)so.FindProperty("titleText").objectReferenceValue;
+            card = $"카드 {(group.gameObject.activeSelf ? "켜짐" : "꺼짐")} 알파 {group.alpha:0.00} 제목 \"{title.text}\" dt={Time.unscaledDeltaTime:0.000}";
+        }
+        Log($"  [spectator] {name} 캡처 ({StateLine()}) {card}");
+    }
+
+    private static void HandleRankingRevealed()
+    {
+        revealAt = Time.unscaledTime;
+        revealFrame = Time.frameCount;
+    }
+
+    // 종합순위 점검: 두 쳇바퀴 기록을 합친 순위가 나와야 한다
+    // 발전량은 출력(속도에 비례) × 시간 적산, 거리는 회전 신호 수라 따로 계산된다. 일정한 속도로 달리면 거리 1m 당 발전량은 두 쳇바퀴가 같아야 한다.
+    private static void CheckEnergyRatio()
+    {
+        float r1 = Session(1).EnergyWh / Mathf.Max(0.1f, Session(1).DistanceM);
+        float r2 = Session(2).EnergyWh / Mathf.Max(0.1f, Session(2).DistanceM);
+        float diff = Mathf.Abs(r1 / Mathf.Max(1e-6f, r2) - 1f);
+        Log($"  [energy] 1m 당 발전량 w1 {r1 * 1000f:0.00}mWh/m, w2 {r2 * 1000f:0.00}mWh/m, 차이 {diff * 100f:0}% → {(diff < 0.15f ? "정상" : "실패")}");
+    }
+
+    private static void LogRanks(string tag)
+    {
+        var sb = new StringBuilder($"  [{tag}] 오늘 전체 {WheelRankingStore.TotalCount}명");
+        for (int id = 1; id <= 2; id++)
+        {
+            var s = Session(id);
+            sb.Append($" / w{id} {s.Current} 발전 {s.EnergyRank}위 판매 {s.SaleRank}위 ({s.EnergyWh:0.000}Wh {s.DistanceM:0.0}m, 체험자 {s.TodayCount}명)");
+        }
+        Log(sb.ToString());
     }
 
     private static string StateLine()

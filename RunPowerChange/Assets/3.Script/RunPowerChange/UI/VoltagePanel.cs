@@ -24,4 +24,12 @@ public class VoltagePanel : WheelPanel
         SetText(energyText, PowerFormat.Wh(Session.ScaledEnergyWh));
         SetText(rankText, Session.EnergyRank.ToString());
     }
+
+    // 같은 회차의 옆 체험자가 먼저 기록을 저장하면 종합순위가 바뀔 수 있어 계속 맞춘다
+    private void Update()
+    {
+        if (Session == null || rankText == null) return;
+        string rank = Session.EnergyRank.ToString();
+        if (rankText.text != rank) rankText.text = rank;
+    }
 }

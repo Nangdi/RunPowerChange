@@ -364,6 +364,142 @@ def sfx_ranking():
     return echo(out, 0.14, 0.3, 0.3, 3)
 
 
+# ── 관중 소리 (85형 관전 화면 발표) ───────────────────────
+
+def band_fft(x, lo, hi, soft=0.25):
+    """주파수 영역에서 lo~hi Hz 만 남긴다 (경계는 soft 비율만큼 부드럽게)"""
+    spec = np.fft.rfft(x)
+    f = np.fft.rfftfreq(len(x), 1 / RATE)
+    lo_edge = np.clip((f - lo * (1 - soft)) / max(1e-6, lo * soft), 0, 1)
+    hi_edge = np.clip((hi * (1 + soft) - f) / max(1e-6, hi * soft), 0, 1)
+    return np.fft.irfft(spec * lo_edge * hi_edge, len(x))
+
+
+def formant_fft(x, formants):
+    """목소리 모음 모양: (주파수, 폭, 크기) 봉우리들만 남긴다"""
+    spec = np.fft.rfft(x)
+    f = np.fft.rfftfreq(len(x), 1 / RATE)
+    env = np.zeros_like(f)
+    for fc, bw, gain in formants:
+        env += gain * np.exp(-0.5 * ((f - fc) / bw) ** 2)
+    return np.fft.irfft(spec * env, len(x))
+
+
+def clap(gain=1.0):
+    """박수 한 번: 짧은 잡음 터짐 (손바닥 크기마다 울림 높이가 다르다)"""
+    n = int(RATE * 0.06)
+    t = np.arange(n) / RATE
+    center = rng.uniform(900, 2200)
+    s = band_fft(rng.uniform(-1, 1, n), center * 0.55, center * 1.8)
+    # 손바닥이 부딪히는 순간 2~3번 잘게 겹쳐 들린다
+    env = np.exp(-t * rng.uniform(55, 80))
+    for k in range(rng.integers(1, 3)):
+        d = int(RATE * rng.uniform(0.002, 0.007)) * (k + 1)
+        env[d:] += np.exp(-t[:n - d] * 90) * 0.5
+    return s * env * gain
+
+
+def applause_bed(seconds, rate_curve, people=None):
+    """여러 사람의 박수. rate_curve(t) = 초당 박수 수"""
+    n = int(RATE * seconds)
+    left, right = np.zeros(n), np.zeros(n)
+    t = 0.0
+    while t < seconds:
+        rate = max(1.0, rate_curve(t))
+        t += rng.exponential(1 / rate)
+        if t >= seconds: break
+        c = clap(rng.uniform(0.35, 1.0))
+        pan = rng.uniform(0.15, 0.85)
+        i = int(RATE * t)
+        m = min(len(c), n - i)
+        left[i:i + m] += c[:m] * (1 - pan)
+        right[i:i + m] += c[:m] * pan
+    return left, right
+
+
+def crowd_voices(seconds, voices=36, start_spread=0.35):
+    """관중의 "와아~" 함성. 아이들 위주의 높은 목소리 + 어른 목소리를 모음별로 묶어 만든다"""
+    n = int(RATE * seconds)
+    t = np.arange(n) / RATE
+    # (F1, F2, F3) 아/오/에 모음. 아이 목소리라 성인보다 조금 높게
+    vowels = [
+        [(950, 140, 1.0), (1500, 180, 0.6), (3000, 300, 0.25)],   # 아
+        [(650, 120, 1.0), (1050, 150, 0.55), (2900, 300, 0.2)],   # 오
+        [(700, 120, 1.0), (2100, 220, 0.5), (3100, 300, 0.25)],   # 에
+    ]
+    left, right = np.zeros(n), np.zeros(n)
+    for group, formants in enumerate(vowels):
+        src_l, src_r = np.zeros(n), np.zeros(n)
+        for v in range(voices // len(vowels)):
+            child = rng.random() < 0.7
+            f0 = rng.uniform(240, 380) if child else rng.uniform(120, 190)
+            start = rng.uniform(0, start_spread)
+            length = rng.uniform(seconds * 0.45, seconds * 0.85)
+            # 음높이: 처음에 확 올라갔다가 천천히 내려온다 (환호 억양) + 떨림
+            k = np.clip((t - start) / length, 0, 1)
+            contour = f0 * (1 + 0.35 * np.minimum(k / 0.15, 1) - 0.25 * k)
+            contour *= 1 + 0.02 * np.sin(2 * np.pi * rng.uniform(4.5, 6.5) * t + rng.random() * 6)
+            src = osc(contour, seconds, "saw", rng.random())
+            env = np.clip((t - start) / rng.uniform(0.12, 0.3), 0, 1) * np.clip((start + length - t) / (length * 0.45), 0, 1)
+            src *= env ** 1.3 * rng.uniform(0.5, 1.0)
+            pan = rng.uniform(0.1, 0.9)
+            src_l += src * (1 - pan)
+            src_r += src * pan
+        left += formant_fft(src_l, formants)
+        right += formant_fft(src_r, formants)
+    # 숨소리 섞인 웅성거림 (목소리 사이를 메움)
+    breath_env = np.clip(t / 0.3, 0, 1) * np.clip((seconds - t) / (seconds * 0.6), 0, 1)
+    for ch in (left, right):
+        ch += band_fft(rng.uniform(-1, 1, n), 500, 3500) * breath_env * np.abs(ch).max() * 0.35
+    return left, right
+
+
+def whistle(seconds, f0, f1, f2):
+    """손가락 휘파람: 올라갔다 내려오는 높은 사인파"""
+    t = t_axis(seconds)
+    k = t / seconds
+    f = np.where(k < 0.35, f0 + (f1 - f0) * k / 0.35, f1 + (f2 - f1) * (k - 0.35) / 0.65)
+    s = osc(f * (1 + 0.004 * np.sin(2 * np.pi * 7 * t)), seconds)
+    s += highpass(noise(seconds), 4000) * 0.06
+    return s * adsr(len(s), 0.04, 0.1, 0.8, 0.15)
+
+
+def sfx_cheer():
+    # 경기 결과 발표: 관중 환호(와아~) + 박수 + 휘파람. 약 3.5초, 끝은 자연스럽게 줄어든다.
+    seconds = 3.6
+    vl, vr = crowd_voices(seconds)
+    al, ar = applause_bed(seconds, lambda t: 70 * min(1, t / 0.4) * max(0.15, 1 - t / seconds))
+    left = vl / max(1e-9, np.abs(vl).max()) * 0.75 + al / max(1e-9, np.abs(al).max()) * 0.45
+    right = vr / max(1e-9, np.abs(vr).max()) * 0.75 + ar / max(1e-9, np.abs(ar).max()) * 0.45
+    for start, pan, (f0, f1, f2) in ((0.35, 0.25, (1900, 2900, 2300)), (1.0, 0.75, (2100, 3300, 2600))):
+        w = whistle(0.7, f0, f1, f2) * 0.22
+        i = int(RATE * start)
+        left[i:i + len(w)] += w * (1 - pan)
+        right[i:i + len(w)] += w * pan
+    out = np.stack([left, right], 1)
+    out = np.tanh(out / np.percentile(np.abs(out), 99.5) * 0.9)   # 튀는 박수 끝을 부드럽게 눌러 함성과 크기를 맞춤
+    k = int(RATE * 0.6)
+    out[-k:] *= np.linspace(1, 0, k)[:, None] ** 1.5   # 꼬리를 부드럽게
+    return normalize(out, 0.85)
+
+
+def sfx_applause():
+    # 종합 순위 발표: 힘찬 박수 (빨리 커졌다가 천천히 잦아듦) + 짧은 반짝임. 약 3초.
+    seconds = 3.0
+    al, ar = applause_bed(seconds, lambda t: 110 * min(1, t / 0.25) * max(0.1, 1 - (t / seconds) ** 1.5))
+    left = al / max(1e-9, np.abs(al).max())
+    right = ar / max(1e-9, np.abs(ar).max())
+    sp = sparkle(0.9, 91)
+    left[:len(sp)] += sp * 0.35
+    right[:len(sp)] += sp * 0.35
+    out = np.stack([left, right], 1)
+    # 박수는 짧게 튀는 소리라 최고점만 커서 다른 효과음보다 작게 들린다. 부드럽게 눌러(tanh) 평균 크기를 맞춘다.
+    out = np.tanh(out / np.percentile(np.abs(out), 99.0) * 1.1)
+    k = int(RATE * 0.5)
+    out[-k:] *= np.linspace(1, 0, k)[:, None] ** 1.5
+    return normalize(out, 0.8)
+
+
 # ── 저장 ─────────────────────────────────────────────
 
 def save(name, samples, force, peak=0.85):
@@ -399,6 +535,8 @@ TABLE = {
         {"key": "money", "file": "sfx_money.wav", "volume": 1.0},
         {"key": "tick", "file": "sfx_tick.wav", "volume": 0.6},
         {"key": "ranking", "file": "sfx_ranking.wav", "volume": 1.0},
+        {"key": "cheer", "file": "sfx_cheer.wav", "volume": 0.7},
+        {"key": "applause", "file": "sfx_applause.wav", "volume": 0.9},
     ],
 }
 
@@ -427,6 +565,8 @@ def main():
     save("sfx_money.wav", sfx_money(), force)
     save("sfx_ranking.wav", sfx_ranking(), force)
     save("sfx_tick.wav", sfx_tick(), force, 0.7)
+    save("sfx_cheer.wav", sfx_cheer(), force)
+    save("sfx_applause.wav", sfx_applause(), force)
 
     # sound.json: 없으면 새로 쓰고, 있으면 없는 키만 덧붙인다 (현장에서 바꾼 파일 이름·볼륨은 지킨다)
     table_path = os.path.join(OUT, "sound.json")

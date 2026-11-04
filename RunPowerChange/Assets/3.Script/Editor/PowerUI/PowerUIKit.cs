@@ -61,6 +61,9 @@ public static class PowerUIKit
     public static readonly Color YellowColor = new Color32(251, 176, 59, 255);   // 문구 강조
     public const string YellowHex = "#FBB03B";
     public static readonly Color WhiteColor = Color.white;
+    // PLAYER 01/02 이름 색 (85형 안내 카드). 3D 레인 색(01 파랑, 02 분홍)에 맞춤
+    public static readonly Color Player1Color = new Color32(47, 128, 237, 255);
+    public static readonly Color Player2Color = new Color32(236, 56, 140, 255);
     public static readonly Color ShadowColor = new Color(0f, 0f, 0f, 0.45f);
 
     #endregion

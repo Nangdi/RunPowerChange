@@ -66,6 +66,16 @@
             "key": "tick",
             "file": "sfx_tick.wav",
             "volume": 0.6
+        },
+        {
+            "key": "cheer",
+            "file": "sfx_cheer.wav",
+            "volume": 0.7
+        },
+        {
+            "key": "applause",
+            "file": "sfx_applause.wav",
+            "volume": 0.9
         }
     ]
 }

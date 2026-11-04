@@ -10,6 +10,7 @@ using UnityEngine;
 //  join (체험 시작·참여하기) / ready (참가 마감, 준비하세요) / count (3·2·1) / go / finish (달리기 끝)
 //  select (전압 선택) / card (판매 카드가 하나씩 나타날 때) / ranking (랭킹 화면)
 //  판매 금액 카운트(SaleSlot): tick (금액이 오르는 동안) / money (얻은 금액에 도달했을 때)
+//  85형 관전 화면 발표: cheer (달리기가 끝나 승자·도전 결과 발표, 관중 환호) / applause (종합 순위 발표, 박수)
 public class PowerSoundDirector : MonoBehaviour
 {
     [SerializeField] private WheelSession[] sessions;
@@ -22,6 +23,21 @@ public class PowerSoundDirector : MonoBehaviour
     private bool[] slotDone;
 
     private static GameDynamicData Config => JsonManager.instance.gameDynamicData;
+
+    private void OnEnable()
+    {
+        SpectatorScreen.WinnerAnnounced += PlayCheer;
+        SpectatorScreen.RankingRevealed += PlayApplause;
+    }
+
+    private void OnDisable()
+    {
+        SpectatorScreen.WinnerAnnounced -= PlayCheer;
+        SpectatorScreen.RankingRevealed -= PlayApplause;
+    }
+
+    private static void PlayCheer() => SoundManager.PlaySfx("cheer");
+    private static void PlayApplause() => SoundManager.PlaySfx("applause");
 
     private void Start()
     {

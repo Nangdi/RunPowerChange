@@ -214,7 +214,8 @@ public class WindowsTouchInput : BaseInput
         var origin = new POINT();
         ClientToScreen(mainWindow, ref origin);
         float height = rect.bottom - rect.top;
-        return new Vector2(screen.x - origin.x, height - (screen.y - origin.y));
+        // Unity 마우스 좌표와 같게 맨 아래 픽셀이 y=0 (빌드에서 마우스 좌표와 비교해 확인)
+        return new Vector2(screen.x - origin.x, height - 1 - (screen.y - origin.y));
     }
 
     // ── 훅 ──────────────────────────────────────────────

@@ -136,6 +136,8 @@ MonoBehaviour:
   - {fileID: 4792330369565515742}
   energyTable: {fileID: 1783898663955449319}
   saleTable: {fileID: 8666041429217119243}
+  notice: {fileID: 1591407425697134000}
+  goSeconds: 1
 --- !u!1 &8356370003395859105
 GameObject:
   m_ObjectHideFlags: 0
@@ -308,6 +310,18 @@ CanvasGroup:
     type: 3}
   m_PrefabInstance: {fileID: 4813869059175966738}
   m_PrefabAsset: {fileID: 0}
+--- !u!114 &1591407425697134000 stripped
+MonoBehaviour:
+  m_CorrespondingSourceObject: {fileID: 6114653511255186850, guid: 7b5d3335bbe120842bb838c4eeecc1b0,
+    type: 3}
+  m_PrefabInstance: {fileID: 4813869059175966738}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: e23ce8b3203172d4aaa369ec1d5c3d1f, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
 --- !u!114 &1783898663955449319 stripped
 MonoBehaviour:
   m_CorrespondingSourceObject: {fileID: 6489654101972266485, guid: 7b5d3335bbe120842bb838c4eeecc1b0,

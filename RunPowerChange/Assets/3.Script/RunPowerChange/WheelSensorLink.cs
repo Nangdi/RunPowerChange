@@ -5,11 +5,15 @@ using UnityEngine;
 // 쳇바퀴 1대의 센서 상태. 속도와 앱 시작 후 누적 이동거리를 들고 있다.
 // 세션은 시작 시점의 TotalDistanceM 을 기억해 두고 차이로 체험 거리를 계산한다.
 //
-// 센서는 쳇바퀴가 1회전할 때마다 신호 1개를 보낸다 (1회전 = wheelCircumferenceM).
-// 신호가 몇 초 간격으로 띄엄띄엄 오므로
-//  - 속도: 직전 두 회전의 간격으로 계산하고, 다음 회전이 늦어지면 (둘레 / 경과시간)으로 줄여 간다.
-//  - 거리: 회전마다 둘레만큼 한 번에 뛰지 않도록 속도로 적분해 보여 주되,
-//          확인된 회전 수(CountedDistanceM)를 넘지 않게 하고, 1회전 넘게 뒤처지면 순간이동 없이 서서히 따라잡는다.
+// 센서는 쳇바퀴 안쪽 기어에 붙어 있어, 쳇바퀴 1회전에 신호(R1)가 pulsesPerRotation 개(현장 20개) 온다.
+// 신호 1개 = DistancePerPulseM (둘레 / pulsesPerRotation). 속도·거리는 여기에 속도 배율(speedMultiplier)을 곱한
+// 게임 값(GameDistancePerPulseM)으로 계산한다 (쳇바퀴가 무거워 실제 속도가 낮게 나오므로). 센서 튐 판정만 실제 값 기준.
+//  - 속도: 최근 speedWindowSeconds 동안 들어온 신호 수로 계산한다. 신호가 잦아(15km/h 에 초당 약 13개)
+//          직전 한 간격만 보면 프레임 단위 수신 시각 오차로 숫자가 크게 흔들리고, 한 프레임에 몰려 들어온
+//          신호가 센서 튐으로 버려지기 때문이다. 다음 신호가 예상보다 늦어지면 그만큼 줄여 간다.
+//  - 센서 튐: 구간 안 신호 수가 maxValidSpeedKmh 로 낼 수 있는 수보다 많으면 넘치는 신호만 버린다.
+//  - 거리: 신호마다 한 번에 뛰지 않도록 속도로 적분해 보여 주되,
+//          확인된 신호 수(CountedDistanceM)를 넘지 않게 하고, 신호 1개 넘게 뒤처지면 순간이동 없이 서서히 따라잡는다.
 public class WheelSensor
 {
     public int WheelId { get; }
@@ -21,21 +25,31 @@ public class WheelSensor
     public float SpeedKmh => SpeedMps * 3.6f;
     // 앱 시작 후 누적 이동거리 (m, 화면용으로 보간). 줄어들지 않는다.
     public double TotalDistanceM { get; private set; }
-    // 회전 신호로 확인된 누적 이동거리 (m) = 회전 수 × 둘레
+    // 회전 신호로 확인된 누적 이동거리 (m) = 신호 수 × 신호 1개 거리
     public double CountedDistanceM { get; private set; }
-    // 앱 시작 후 인식한 회전 수
-    public long RotationCount { get; private set; }
+    // 앱 시작 후 인식한 회전 신호(R1) 수 (쳇바퀴 회전 수가 아니라 기어 회전 수)
+    public long PulseCount { get; private set; }
     // 마지막으로 센서 메시지를 받은 시각 (Time.unscaledTime). 받은 적 없으면 -1.
     public float LastMessageTime { get; private set; } = -1f;
 
-    private float lastRotationTime = -1f;
-    // 직전 두 회전 간격으로 계산한 속도 (m/s). 정지 후 첫 회전이면 0.
-    private float intervalSpeedMps;
-    // 화면 거리를 움직이는 속도 (m/s). 속도를 아직 모르는 첫 회전에도 캐릭터가 걷게 하려고 SpeedMps 와 따로 둔다.
+    private float lastPulseTime = -1f;
+    // 속도 계산 구간 안에 들어온 신호 시각들 (오래된 것부터)
+    private readonly Queue<float> recentPulses = new Queue<float>();
+    // 구간 안 신호로 계산한 속도 (m/s). 정지 후 첫 신호처럼 신호가 1개뿐이면 0.
+    private float windowSpeedMps;
+    // 화면 거리를 움직이는 속도 (m/s). 속도를 아직 모르는 첫 신호에도 캐릭터가 걷게 하려고 SpeedMps 와 따로 둔다.
     private float displayMps;
 
-    // 1회전 넘게 뒤처졌을 때 넘친 거리를 따라잡는 시간(초)
+    // 키 시뮬레이션: 한 번 누르면 쳇바퀴 1회전분 신호를 직전 누른 간격에 나눠 보낸다
+    private float simLastTapTime = -1f;
+    private int simPending;
+    private float simSpacing;
+    private float simNextTime;
+
+    // 신호 1개 넘게 뒤처졌을 때 넘친 거리를 따라잡는 시간(초)
     private const float LagRecoverSeconds = 0.5f;
+    // 다음 신호가 예상 간격의 이 배수보다 늦어지면 그때부터 속도를 줄인다 (수신 시각 오차로 흔들리지 않게)
+    private const float LateTolerance = 1.5f;
 
     public WheelSensor(int wheelId, int controllerId, KeyCode simulateKey)
     {
@@ -44,64 +58,96 @@ public class WheelSensor
         SimulateKey = simulateKey;
     }
 
-    // 1회전 신호 수신. 처리 결과를 문자열로 돌려준다 ("무시됨"으로 시작하면 버린 신호).
-    public string ApplyRotation(float now, GameDynamicData cfg)
+    // 회전 신호(R1) 1개 수신. 처리 결과를 문자열로 돌려준다 ("무시됨"으로 시작하면 버린 신호).
+    public string ApplyPulse(float now, GameDynamicData cfg)
     {
         LastMessageTime = now;
-        float circ = Circumference(cfg);
+        float d = cfg.DistancePerPulseM;          // 실제 거리 (센서 튐 판정용)
+        float gameD = cfg.GameDistancePerPulseM;  // 게임 거리 (속도 배율 적용, 거리·속도용)
+        float mult = cfg.SpeedMultiplier;
+        float window = WindowSeconds(cfg);
+        float maxMps = Mathf.Max(0.1f, cfg.maxValidSpeedKmh / 3.6f);
+
+        bool afterStop = lastPulseTime >= 0f && now - lastPulseTime > StopSeconds(cfg);
+        if (afterStop) recentPulses.Clear();
+        while (recentPulses.Count > 0 && now - recentPulses.Peek() > window) recentPulses.Dequeue();
+
+        // 센서 튐: 구간 안 신호 수가 사람이 낼 수 없는 속도만큼 많아지면 넘치는 신호는 버린다.
+        // 한 간격만 보지 않으므로 한 프레임에 몰려 들어온 정상 신호는 버리지 않는다.
+        int maxPulses = Mathf.FloorToInt(maxMps * window / d) + 1;
+        if (recentPulses.Count + 1 > maxPulses)
+            return $"무시됨: 최근 {window:0.0}s 신호 {recentPulses.Count + 1}개 = {(recentPulses.Count + 1) * d / window * 3.6f:0.0}km/h 이상 (> {cfg.maxValidSpeedKmh}km/h)";
+
+        recentPulses.Enqueue(now);
+        lastPulseTime = now;
+        PulseCount++;
+        CountedDistanceM += gameD;
 
         string speedNote;
-        if (lastRotationTime >= 0f)
+        float span = now - recentPulses.Peek();
+        if (recentPulses.Count >= 2 && span > 0.001f)
         {
-            float interval = now - lastRotationTime;
-            float kmh = interval > 0f ? circ / interval * 3.6f : float.PositiveInfinity;
-            // 센서 튐: 사람이 낼 수 없는 속도로 환산되는 간격. 기준 시각을 바꾸지 않아야 다음 정상 신호가 맞게 계산된다.
-            if (kmh > cfg.maxValidSpeedKmh)
-                return $"무시됨: 회전 간격 {interval:0.00}s = {kmh:0.0}km/h (> {cfg.maxValidSpeedKmh}km/h)";
-
-            if (interval <= StopSeconds(cfg))
-            {
-                intervalSpeedMps = circ / interval;
-                speedNote = $"간격 {interval:0.00}s, {kmh:0.0}km/h";
-            }
-            else
-            {
-                intervalSpeedMps = 0f;
-                speedNote = $"정지 후 첫 회전 (간격 {interval:0.0}s)";
-            }
+            windowSpeedMps = Mathf.Min(maxMps * mult, (recentPulses.Count - 1) * gameD / span);
+            speedNote = $"최근 {span:0.00}s 신호 {recentPulses.Count}개, 실제 {windowSpeedMps / mult * 3.6f:0.0}km/h × {mult:0.##} = {windowSpeedMps * 3.6f:0.0}km/h";
         }
+        else if (recentPulses.Count >= 2)
+            speedNote = "같은 순간 신호";   // 속도는 직전 값 유지
         else
         {
-            intervalSpeedMps = 0f;
-            speedNote = "첫 회전";
+            windowSpeedMps = 0f;
+            speedNote = afterStop ? "정지 후 첫 신호" : PulseCount == 1 ? "첫 신호" : "구간 첫 신호";
         }
 
-        lastRotationTime = now;
-        RotationCount++;
-        CountedDistanceM += circ;
-        return $"회전 #{RotationCount} 인식 - {speedNote}";
+        float rotations = (float)(PulseCount / Math.Max(1d, cfg.pulsesPerRotation));
+        return $"신호 #{PulseCount} 인식 (쳇바퀴 {rotations:0.00}바퀴) - {speedNote}";
     }
 
-    // 장치 없이 시험: 키를 누를 때마다 회전 신호(R1) 1개를 만든다. 실제 신호와 같은 ApplyRotation 경로를 탄다.
-    // 누른 간격으로 속도가 계산된다. 회전이 생기면 처리 결과, 아니면 null.
+    // 장치 없이 시험: 키를 한 번 누를 때마다 쳇바퀴 1회전분 신호(pulsesPerRotation 개)를 직전 누른 간격에 나눠 만든다.
+    // 실제 신호처럼 한 프레임에 1개씩, 같은 ApplyPulse 경로를 탄다. 누른 간격으로 속도가 정해진다.
+    // 신호가 생기면 처리 결과, 아니면 null.
     public string TickSimulation(float now, GameDynamicData cfg)
     {
-        if (SimulateKey == KeyCode.None || !Input.GetKeyDown(SimulateKey)) return null;
-        return ApplyRotation(now, cfg);
+        if (SimulateKey != KeyCode.None && Input.GetKeyDown(SimulateKey)) SimulateTap(now, cfg);
+        return TickSimulatedPulses(now, cfg);
+    }
+
+    // 시뮬레이션 키 1번 = 쳇바퀴 1회전 (자동 플레이 시험에서도 쓴다)
+    public void SimulateTap(float now, GameDynamicData cfg)
+    {
+        int n = Mathf.Max(1, Mathf.RoundToInt(cfg.pulsesPerRotation));
+        float interval = simLastTapTime >= 0f && now - simLastTapTime <= StopSeconds(cfg) ? now - simLastTapTime : FirstRotationSeconds(cfg);
+        simLastTapTime = now;
+        if (simPending <= 0) simNextTime = now;
+        simPending += n;
+        simSpacing = interval / n;
+    }
+
+    private string TickSimulatedPulses(float now, GameDynamicData cfg)
+    {
+        if (simPending <= 0 || now < simNextTime) return null;
+        simPending--;
+        simNextTime += simSpacing;
+        if (simNextTime < now) simNextTime = now;   // 프레임이 늦어 밀린 만큼은 버리지 않고 다음 프레임부터 이어 간다
+        return ApplyPulse(now, cfg);
     }
 
     // 매 프레임 호출. 속도 계산·평활과 표시 거리 보간을 처리한다.
     public void Tick(float now, float dt, GameDynamicData cfg)
     {
-        float circ = Circumference(cfg);
+        float d = cfg.GameDistancePerPulseM;
 
         float targetMps = 0f;
-        if (lastRotationTime >= 0f && intervalSpeedMps > 0f)
+        if (lastPulseTime >= 0f && windowSpeedMps > 0f)
         {
-            float elapsed = now - lastRotationTime;
-            // 다음 회전이 예상보다 늦으면 그만큼 느려진 것으로 본다
+            float elapsed = now - lastPulseTime;
+            // 다음 신호가 예상 간격(신호 1개 거리 / 속도)보다 한참 늦으면 그만큼 느려진 것으로 본다
             if (elapsed <= StopSeconds(cfg))
-                targetMps = Mathf.Min(intervalSpeedMps, circ / Mathf.Max(0.01f, elapsed));
+                targetMps = Mathf.Min(windowSpeedMps, d * LateTolerance / Mathf.Max(0.01f, elapsed));
+            else
+            {
+                windowSpeedMps = 0f;
+                recentPulses.Clear();
+            }
         }
 
         float smoothing = Mathf.Max(0.01f, cfg.speedSmoothingSeconds);
@@ -109,21 +155,21 @@ public class WheelSensor
         SpeedMps = Mathf.Lerp(SpeedMps, targetMps, blend);
         if (targetMps <= 0f && SpeedMps < 0.05f) SpeedMps = 0f;
 
-        // 화면 거리: 속도를 알면 그 속도로 간다. 정지 후 첫 회전처럼 속도를 아직 모르면
-        // 확인된 회전 거리를 firstRotationSeconds 에 걸쳐 일정한 빠르기로 걸어간다 (속도·발전량은 그대로 0).
+        // 화면 거리: 속도를 알면 그 속도로 간다. 정지 후 첫 신호처럼 속도를 아직 모르면
+        // 확인된 신호 거리를 firstRotationSeconds 에 걸쳐 일정한 빠르기로 걸어간다 (속도·발전량은 그대로 0).
         // 남은 거리에 비례해 따라가면 신호 직후 순간적으로 튀어 나갔다가 멈춰 보인다.
         float gap = (float)(CountedDistanceM - TotalDistanceM);
-        float displayTarget = targetMps > 0f ? targetMps : gap > 0.01f ? circ / FirstRotationSeconds(cfg) : 0f;
+        float displayTarget = targetMps > 0f ? targetMps : gap > 0.01f ? d / FirstRotationSeconds(cfg) : 0f;
         displayMps = Mathf.Lerp(displayMps, displayTarget, blend);
         if (displayTarget <= 0f && displayMps < 0.05f) displayMps = 0f;
 
-        // 빨라져서 1회전 넘게 뒤처지면 넘친 거리만큼만 짧게 나눠 따라잡는다 (한 번에 옮기면 캐릭터가 튄다)
-        float lagFix = gap > circ ? (gap - circ) / LagRecoverSeconds : 0f;
+        // 빨라져서 신호 1개 넘게 뒤처지면 넘친 거리만큼만 짧게 나눠 따라잡는다 (한 번에 옮기면 캐릭터가 튄다)
+        float lagFix = gap > d ? (gap - d) / LagRecoverSeconds : 0f;
         double next = TotalDistanceM + (displayMps + lagFix) * dt;
         TotalDistanceM = Math.Max(TotalDistanceM, Math.Min(next, CountedDistanceM));
     }
 
-    private static float Circumference(GameDynamicData cfg) => Mathf.Max(0.01f, cfg.wheelCircumferenceM);
+    private static float WindowSeconds(GameDynamicData cfg) => Mathf.Max(0.2f, cfg.speedWindowSeconds);
     private static float StopSeconds(GameDynamicData cfg) => Mathf.Max(0.5f, cfg.rotationStopSeconds);
     private static float FirstRotationSeconds(GameDynamicData cfg) => Mathf.Max(0.3f, cfg.firstRotationSeconds);
 }
@@ -131,7 +177,7 @@ public class WheelSensor
 // 쳇바퀴 회전 센서 컨트롤러와의 RS232 통신. 규약은 Docs/ControllerProtocol.md 참고.
 // SerialPortManager 대신 이 컴포넌트를 씬에 둔다.
 //
-// 컨트롤러 → PC : R1 (쳇바퀴 1회전), ERR,내용 / PONG
+// 컨트롤러 → PC : R1 (기어 1회전 = 쳇바퀴 1/pulsesPerRotation 회전), ERR,내용 / PONG
 // PC → 컨트롤러 : PING (연결 확인용, 열린 모든 포트로)
 //
 // 컨트롤러 id 로 쳇바퀴를 구분한다: 쳇바퀴마다 컨트롤러가 1대씩 붙고 체험자가 따로 달리므로,
@@ -202,7 +248,7 @@ public class WheelSensorLink : SerialPortManager
     {
         base.Start();
         foreach (var s in Sensors)
-            ShortcutHelp.Register(this, s.SimulateKey, $"쳇바퀴 {s.WheelId} 회전 신호(R1) 1개 보내기 (누른 간격으로 속도 계산)", "모든 화면, 발전 중에만 기록됨");
+            ShortcutHelp.Register(this, s.SimulateKey, $"쳇바퀴 {s.WheelId} 1바퀴 돌리기 (회전 신호 R1 을 1바퀴분 보냄, 누른 간격으로 속도 계산)", "모든 화면, 발전 중에만 기록됨");
     }
 
     protected override void OnDestroy()
@@ -253,7 +299,7 @@ public class WheelSensorLink : SerialPortManager
                 return;
             }
 
-            string note = sensor.ApplyRotation(Time.unscaledTime, Config);
+            string note = sensor.ApplyPulse(Time.unscaledTime, Config);
             ReportInterpretation(controllerId, $"쳇바퀴 {sensor.WheelId} {note}", note.StartsWith("무시됨"));
             return;
         }

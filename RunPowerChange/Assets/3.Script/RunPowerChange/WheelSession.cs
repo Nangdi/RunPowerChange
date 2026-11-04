@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using UnityEngine;
 
 // 쳇바퀴 1대(체험자 1명)의 체험 흐름. 달리기까지는 GameRound 가 두 쳇바퀴를 같은 회차로 묶어 진행하고,
@@ -11,6 +12,7 @@ using UnityEngine;
 // - 화면(패널)은 OnStateChanged 를 구독하고 아래 공개 값을 읽어 그린다. 버튼은 공개 메서드를 호출한다.
 // - 관전 화면(85형)도 같은 값을 읽는다.
 // - 랭킹(발전왕·판매왕)은 전압을 고를 때 한 번에 기록한다. 중간에 끊긴 체험은 랭킹에 기록하지 않는다.
+//   순위는 쳇바퀴별이 아니라 두 쳇바퀴 기록을 합친 게임 전체 종합순위다 (WheelRankingStore.TotalRank).
 // - 달리기 기록(고스트·85형 최고 랭킹 선용)은 달리기가 끝날 때 RaceRecordStore 에 넘긴다.
 public class WheelSession : MonoBehaviour
 {
@@ -22,6 +24,11 @@ public class WheelSession : MonoBehaviour
     [Header("개발자용")]
     [Tooltip("체험 중 남은 시간을 바로 끝내는 키 (에디터 시험용)")]
     [SerializeField] private KeyCode debugFinishRunKey = KeyCode.None;
+
+    // 디버그 시작 키: 쳇바퀴 번호와 같은 숫자 키(1 → 쳇바퀴 1, 2 → 쳇바퀴 2, 키패드 숫자도 됨).
+    // 대기화면의 체험시작 버튼(옆 쳇바퀴가 참가 대기 중이면 참여하기)과 같은 동작이다.
+    public KeyCode DebugStartKey => wheelId >= 1 && wheelId <= 9 ? KeyCode.Alpha0 + wheelId : KeyCode.None;
+    private KeyCode DebugStartKeypad => wheelId >= 1 && wheelId <= 9 ? KeyCode.Keypad0 + wheelId : KeyCode.None;
 
     public int WheelId => wheelId;
     public State Current { get; private set; } = State.Idle;
@@ -50,14 +57,45 @@ public class WheelSession : MonoBehaviour
     // 게이지 최대값: 최대 출력으로 saleScaleMinutes 동안 달렸을 때 (Wh)
     public float MaxScaledEnergyWh => PowerModel.ScaledWh(Config.MaxWatt, Config);
 
-    // 발전 결과 (SelectVoltage 부터 유효). 순위는 아직 기록 전이므로 미리 계산한 값.
-    public int EnergyRank { get; private set; }
+    // 발전 종합순위 (두 쳇바퀴 기록 합산. SelectVoltage 부터 유효, 그 전에는 0).
+    // 기록을 저장한 뒤에는 저장된 기록 기준이라, 같은 회차의 다른 체험자가 나중에 저장해도 순위가 맞게 바뀐다.
+    // 저장 전(전압 선택 화면)에는 같은 회차에서 아직 저장하지 않은 다른 체험자의 발전량도 끼워 미리 계산한다.
+    public int EnergyRank
+    {
+        get
+        {
+            if (LastRecord != null) return WheelRankingStore.TotalRank(WheelRankingStore.Kind.Energy, LastRecord.energyWh);
+            if (Current != State.SelectVoltage) return 0;
+            int rank = WheelRankingStore.TotalRank(WheelRankingStore.Kind.Energy, EnergyWh);
+            foreach (var other in PendingOthers())
+                if (other.EnergyWh > EnergyWh) rank++;
+            return rank;
+        }
+    }
     // 판매 결과 (Sale 부터 유효)
     public int SelectedVoltageIndex { get; private set; } = -1;
     public SaleResult Sale { get; private set; }
-    public int SaleRank { get; private set; }
-    // 오늘 체험자 수 (이번 체험 포함)
-    public int TodayCount { get; private set; }
+    // 판매 종합순위 (Sale 부터 유효, 그 전에는 0)
+    public int SaleRank => LastRecord != null ? WheelRankingStore.TotalRank(WheelRankingStore.Kind.Sale, LastRecord.saleWon) : 0;
+    // 오늘 전체 체험자 수 (두 쳇바퀴 합산. 같은 회차에서 아직 기록을 저장하지 않은 체험자 포함)
+    public int TodayCount
+    {
+        get
+        {
+            int n = WheelRankingStore.TotalCount;
+            if (LastRecord == null && Current == State.SelectVoltage) n++;
+            foreach (var _ in PendingOthers()) n++;
+            return n;
+        }
+    }
+
+    // 같은 회차에서 달리기를 끝내고 아직 기록을 저장하지 않은 다른 체험자
+    private IEnumerable<WheelSession> PendingOthers()
+    {
+        if (Round == null) yield break;
+        foreach (var p in Round.Participants)
+            if (p != null && p != this && p.Current == State.SelectVoltage && p.LastRecord == null) yield return p;
+    }
     // 자동 넘김 화면의 남은 시간 비율 1→0 (하단 진행 바). 자동 넘김이 없는 화면은 1.
     public float AutoAdvanceRemaining01
     {
@@ -99,6 +137,7 @@ public class WheelSession : MonoBehaviour
 
         GoTo(State.Idle);
         ShortcutHelp.Register(this, debugFinishRunKey, "발전 바로 끝내기 (시험용)", "발전 중");
+        ShortcutHelp.Register(this, DebugStartKey, $"쳇바퀴 {wheelId} 체험 시작 (체험시작·참여하기 버튼과 같음, 키패드 {wheelId}도 됨)", $"쳇바퀴 {wheelId} 대기화면, 숫자 입력칸 입력 중 제외");
     }
 
     private void OnDestroy() => ShortcutHelp.Unregister(this);
@@ -120,6 +159,12 @@ public class WheelSession : MonoBehaviour
     private void Update()
     {
         if (JsonManager.instance == null) return; // 앱 종료 중
+        if (Current == State.Idle && DebugStartKeyDown())
+        {
+            Debug.Log($"[Wheel {wheelId}] 디버그 키로 체험 시작");
+            StartExperience();
+        }
+
         switch (Current)
         {
             case State.Run:
@@ -201,9 +246,9 @@ public class WheelSession : MonoBehaviour
     public void FinishRun()
     {
         if (Current != State.Run) return;
+        // 이번 프레임에 이 세션이 GameRound 보다 늦게 업데이트돼 마지막 구간을 아직 적산하지 않았으면 체험 끝 시각까지 채운다
+        TickRun(0f);
         RunElapsed = RunDuration;
-        TodayCount = Ranking.Count + 1;
-        EnergyRank = Ranking.GetRank(WheelRankingStore.Kind.Energy, EnergyWh);
 
         if (track != null)
         {
@@ -215,11 +260,24 @@ public class WheelSession : MonoBehaviour
             track = null;
         }
 
-        Debug.Log($"[Wheel {wheelId}] 발전 종료: {EnergyWh:0.00}Wh, {DistanceM:0}m, 평균 {AverageWatt:0}W, 발전 {EnergyRank}/{TodayCount}위");
         GoTo(State.SelectVoltage);
+        Debug.Log($"[Wheel {wheelId}] 발전 종료: {EnergyWh:0.00}Wh, {DistanceM:0}m, 평균 {AverageWatt:0}W, 발전 종합 {EnergyRank}/{TodayCount}위");
     }
 
     // ── 내부 ───────────────────────────────────────────
+
+    // 설정창 숫자 입력칸에 숫자를 치는 중이면 시작 키로 보지 않는다
+    private bool DebugStartKeyDown()
+    {
+        if (DebugStartKey == KeyCode.None) return false;
+        if (!Input.GetKeyDown(DebugStartKey) && !Input.GetKeyDown(DebugStartKeypad)) return false;
+        var selected = UnityEngine.EventSystems.EventSystem.current != null ? UnityEngine.EventSystems.EventSystem.current.currentSelectedGameObject : null;
+        if (selected == null) return true;
+        var tmp = selected.GetComponent<TMPro.TMP_InputField>();
+        if (tmp != null && tmp.isFocused) return false;
+        var legacy = selected.GetComponent<UnityEngine.UI.InputField>();
+        return legacy == null || !legacy.isFocused;
+    }
 
     // 이전 체험자의 발전·결과 값을 지운다. 대기화면으로 돌아갈 때와 카운트다운·발전 시작 시 호출한다.
     // 센서의 누적거리는 지우지 않는다 (세션은 시작 시점과의 차이만 쓴다).
@@ -229,19 +287,22 @@ public class WheelSession : MonoBehaviour
         EnergyWh = 0f;
         DistanceM = 0f;
         MaxSpeedKmh = 0f;
-        EnergyRank = 0;
-        SaleRank = 0;
         SelectedVoltageIndex = -1;
         Sale = default;
         LastRecord = null;
         track = null;
     }
 
+    // 발전량은 프레임 시간(dt)이 아니라 체험 시계(RunElapsed)가 흐른 만큼만 적산한다.
+    // 프레임 시간을 그대로 쓰면, PC 가 잠깐 멈춘 뒤의 긴 프레임에서 체험 시간이 끝났는데도 멈춘 시간 전체만큼 발전량이 더해지고,
+    // 그 프레임에 GameRound 가 달리기를 끝내는 순서(스크립트 실행 순서)에 따라 한 쳇바퀴에만 더해져 승자·순위가 뒤바뀐다.
     private void TickRun(float dt)
     {
-        RunElapsed = Round != null ? Round.RunElapsed : Mathf.Min(RunDuration, RunElapsed + dt);
+        float elapsed = Round != null ? Round.RunElapsed : Mathf.Min(RunDuration, RunElapsed + dt);
+        float runDt = Mathf.Max(0f, elapsed - RunElapsed);
+        RunElapsed = elapsed;
         if (sensor != null) DistanceM = (float)(sensor.TotalDistanceM - runStartDistance);
-        EnergyWh += Watt * dt / 3600f;
+        EnergyWh += Watt * runDt / 3600f;
         MaxSpeedKmh = Mathf.Max(MaxSpeedKmh, SpeedKmh);
 
         // 고스트·최고 랭킹 선용 시간별 거리
@@ -254,10 +315,6 @@ public class WheelSession : MonoBehaviour
 
     private void CommitRecord()
     {
-        TodayCount = Ranking.Count + 1;
-        EnergyRank = Ranking.GetRank(WheelRankingStore.Kind.Energy, EnergyWh);
-        SaleRank = Ranking.GetRank(WheelRankingStore.Kind.Sale, Sale.saleWon);
-
         LastRecord = Ranking.Add(new PowerRecord
         {
             ticks = DateTime.Now.Ticks,
@@ -271,7 +328,7 @@ public class WheelSession : MonoBehaviour
             distanceM = DistanceM,
             voltageId = Sale.voltageId,
         });
-        Debug.Log($"[Wheel {wheelId}] 기록 저장: {Sale.voltageLabel}, 도착 {Sale.arrivedWh:0.0}Wh, {Sale.saleWon:0.0}원, 판매 {SaleRank}/{TodayCount}위");
+        Debug.Log($"[Wheel {wheelId}] 기록 저장: {Sale.voltageLabel}, 도착 {Sale.arrivedWh:0.0}Wh, {Sale.saleWon:0.0}원, 종합 순위 발전 {EnergyRank}위·판매 {SaleRank}위/{TodayCount}명");
         OnRecordAdded?.Invoke(this, LastRecord);
     }
 

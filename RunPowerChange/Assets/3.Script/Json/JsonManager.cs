@@ -63,16 +63,31 @@ public class GameDynamicData
     // 0 이면 이 화면 없이 바로 체험 안내로 넘어간다 (기본). 참가 대기 초를 센 뒤 또 초를 세면 어색해서 뺐다.
     public float readySeconds = 0f;
 
-    // 쳇바퀴 1회전 이동거리(m). 컨트롤러가 1회전마다 신호를 보내면 이만큼 거리를 더한다. (직경 2m → 6.283)
+    // 쳇바퀴 1회전 이동거리(m) = 둘레. (직경 2m → 6.283)
     public float wheelCircumferenceM = 6.283f;
-    // 이 시간(초) 동안 회전 신호가 없으면 멈춘 것으로 본다. 길수록 천천히 걸어도 속도가 0으로 떨어지지 않는다.
+    // 쳇바퀴 1회전에 컨트롤러가 보내는 회전 신호(R1) 수. 센서가 안쪽 기어에 붙어 있어 기어비만큼 신호가 온다.
+    // 현장 기어비: 쳇바퀴 1바퀴 = 기어 20바퀴 → 20. 신호 1개 = wheelCircumferenceM / pulsesPerRotation (m).
+    public float pulsesPerRotation = 20f;
+    // 속도 계산 구간(초). 최근 이 시간 동안 들어온 신호 수로 속도를 낸다. 길수록 숫자가 덜 흔들리고 반응은 늦다.
+    public float speedWindowSeconds = 1f;
+    // 이 시간(초) 동안 회전 신호가 없으면 멈춘 것으로 본다.
     public float rotationStopSeconds = 5f;
     // 속도 표시 평활 시간(초)
     public float speedSmoothingSeconds = 0.3f;
-    // 직전 회전과의 간격이 이 속도(km/h)보다 빠르게 환산되면 센서 튐(잡음)으로 보고 무시
+    // 속도 계산 구간의 신호가 이 속도(km/h)보다 빠르게 환산되면 넘치는 신호를 센서 튐(잡음)으로 보고 무시
     public float maxValidSpeedKmh = 40f;
-    // 정지 후 첫 회전 신호는 속도를 아직 모르므로, 화면 캐릭터가 그 1회전 거리를 이 시간(초)에 걸쳐 걸어간다
+    // 정지 후 첫 회전 신호는 속도를 아직 모르므로, 화면 캐릭터가 그 신호 1개 거리를 이 시간(초)에 걸쳐 걸어간다
     public float firstRotationSeconds = 2f;
+
+    // 속도 배율. 쳇바퀴가 무거워 평소 달리기보다 속도가 낮게 나오므로, 실제 속도에 이 배율을 곱해 게임 속도로 쓴다.
+    // 화면 속도·거리·발전량이 모두 같은 배율로 커진다 (2 면 실제 6km/h → 12km/h). 센서 튐 판정(maxValidSpeedKmh)은 실제 속도 기준.
+    public float speedMultiplier = 1f;
+
+    // 회전 신호(R1) 1개당 실제 이동거리(m)
+    public float DistancePerPulseM => Mathf.Max(0.01f, wheelCircumferenceM) / Mathf.Max(1f, pulsesPerRotation);
+    public float SpeedMultiplier => Mathf.Max(0.1f, speedMultiplier);
+    // 회전 신호 1개당 게임 이동거리(m) = 실제 거리 × 속도 배율
+    public float GameDistancePerPulseM => DistancePerPulseM * SpeedMultiplier;
 
     // 환산 발전출력(W) = min(MaxWatt, 속도(km/h) × wattPerKmh)
     // 현장 기본 1: 12km/h 로 달리면 12W. 20 이면 걷기 5km/h 100W, 구성안 예시 150W = 7.5km/h (직경 2m 쳇바퀴 1km/h ≈ 2.65rpm)
@@ -121,6 +136,10 @@ public class GameDynamicData
     public float characterAnimMaxKmh = 18f;
     // 85형 아래 칸(랭킹 → 왜 그럴까요? → 우리와 어떤 관련이?)이 바뀌는 간격(초)
     public float spectatorInfoSeconds = 10f;
+    // 85형 관전 화면: 달리기가 끝난 뒤 승자(1인 체험은 도전 결과) 발표를 보여 주는 시간(초)
+    public float spectatorWinnerSeconds = 6f;
+    // 85형 관전 화면: 참가자가 모두 랭킹 화면에 가면 종합 순위 발표를 띄운다. 회차가 먼저 끝나도 최소 이 시간(초)은 보여 준다.
+    public float spectatorRankingSeconds = 10f;
 
     // 소리 (0~1). 소리 파일과 이름은 StreamingAssets/Audio/sound.json
     public float masterVolume = 1f;
