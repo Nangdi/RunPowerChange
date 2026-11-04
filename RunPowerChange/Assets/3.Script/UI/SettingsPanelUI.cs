@@ -26,7 +26,10 @@ using UnityEngine.UI;
 // [출력 디스플레이 선택을 추가하는 방법] (모니터를 여러 대 쓰는 화면마다 1개)
 //  1) 씬의 설정창에 TMP_Dropdown 을 하나 만든다 (옵션은 비워 둔다. 연결된 디스플레이로 채운다).
 //  2) 아래 displaySettings 목록에 (디스플레이 번호 int 필드 경로, Dropdown)을 연결한다 (예: wheels[0].displayIndex).
-//  3) 그 화면의 캔버스·카메라가 DisplayRouting.Changed 를 받아 targetDisplay 를 다시 맞추게 한다.
+//  3) 그 화면의 캔버스·카메라가 DisplayRouting.Changed 를 받아 DisplayRouting.ApplyTo 로 다시 맞추게 한다.
+// 드롭다운에는 "사용 안함"(저장값 -1)과 연결된 디스플레이가 나온다 (에디터는 Game 뷰로 확인하도록 Display 1~8).
+// 저장된 번호의 모니터가 지금 없으면 그 항목을 "(연결 안 됨)"으로 더해 현재 값이 보이게 한다.
+// 드롭다운 순번과 디스플레이 번호가 다르므로 순번 → 번호는 DisplaySetting.values 로 바꾼다.
 // 디스플레이가 1대뿐이면 이 줄들은 숨긴다. 고르면 저장하고 재시작 없이 바로 옮긴다.
 public class SettingsPanelUI : MonoBehaviour
 {
@@ -66,9 +69,13 @@ public class SettingsPanelUI : MonoBehaviour
         public TMP_Dropdown dropdown;
         [Tooltip("디스플레이가 1대뿐일 때 숨길 줄. 비워두면 Dropdown 의 부모를 숨긴다.")]
         public GameObject row;
+        [Tooltip("켜면 \"사용 안함\" 항목을 넣지 않는다. 운영자 화면처럼 끄면 설정창을 다시 열 수 없는 화면에 쓴다.")]
+        public bool required;
 
         [NonSerialized] public FieldInfo field;
         [NonSerialized] public UnityAction<int> handler;
+        // 드롭다운 순번 → 디스플레이 번호 (-1 = 사용 안함)
+        [NonSerialized] public List<int> values;
     }
 
     // 스타트팩이 기본으로 즉시 반영해 주는 설정 필드 이름
@@ -291,21 +298,28 @@ public class SettingsPanelUI : MonoBehaviour
             row.SetActive(DisplayRouting.IsMulti);
             if (setting.field == null || jm.gameDynamicData == null) continue;
             object owner = ResolveOwner(jm.gameDynamicData, setting.fieldName);
-            if (owner != null) FillDisplayOptions(setting.dropdown, Mathf.Max(0, (int)setting.field.GetValue(owner)));
+            if (owner != null) FillDisplayOptions(setting, (int)setting.field.GetValue(owner));
         }
         _syncing = false;
     }
 
-    // 연결된 디스플레이 목록으로 옵션을 채운다. 저장된 번호의 모니터가 빠져 있어도 그 값이 보이도록 끝까지 넣는다.
-    private static void FillDisplayOptions(TMP_Dropdown dropdown, int current)
+    // "사용 안함"과 연결된 디스플레이로 옵션을 채운다. 저장된 번호의 모니터가 없으면 그 값이 보이도록 "(연결 안 됨)"으로 더한다.
+    private static void FillDisplayOptions(DisplaySetting setting, int current)
     {
+        current = current >= 0 ? current : setting.required ? 0 : DisplayRouting.None;
+
+        var values = new List<int>();
+        if (!setting.required) values.Add(DisplayRouting.None);
+        for (int i = 0; i < DisplayRouting.Count; i++) values.Add(i);
+        if (!values.Contains(current)) values.Add(current);
+        setting.values = values;
+
         var options = new List<string>();
-        int count = Mathf.Max(DisplayRouting.Count, current + 1);
-        for (int i = 0; i < count; i++) options.Add(DisplayRouting.Label(i));
-        dropdown.ClearOptions();
-        dropdown.AddOptions(options);
-        dropdown.SetValueWithoutNotify(current);
-        dropdown.RefreshShownValue();
+        foreach (int value in values) options.Add(DisplayRouting.Label(value));
+        setting.dropdown.ClearOptions();
+        setting.dropdown.AddOptions(options);
+        setting.dropdown.SetValueWithoutNotify(values.IndexOf(current));
+        setting.dropdown.RefreshShownValue();
     }
 
     // 인스펙터에 적은 경로를 GameDynamicData 의 int 디스플레이 번호 필드와 연결한다.
@@ -339,12 +353,14 @@ public class SettingsPanelUI : MonoBehaviour
         }
     }
 
-    private void OnDisplaySelected(DisplaySetting setting, int index)
+    private void OnDisplaySelected(DisplaySetting setting, int optionIndex)
     {
         if (_syncing) return;
 
         var jm = JsonManager.instance;
         if (jm == null || setting.field == null) return;
+        if (setting.values == null || optionIndex < 0 || optionIndex >= setting.values.Count) return;
+        int index = setting.values[optionIndex];
 
         object target = ResolveOwner(jm.gameDynamicData, setting.fieldName);
         if (target == null)
@@ -356,7 +372,7 @@ public class SettingsPanelUI : MonoBehaviour
         jm.SaveGameDynamicData();               // persistentDataPath/Setting.json 에 바로 저장
         DisplayRouting.Apply(index);            // 그 화면의 캔버스·카메라를 바로 옮긴다
 
-        Debug.Log($"[Settings] {setting.fieldName} = {index} (Display {index + 1})");
+        Debug.Log($"[Settings] {setting.fieldName} = {index} ({DisplayRouting.Label(index)})");
         OnNumberChanged?.Invoke(setting.fieldName, index);
     }
 

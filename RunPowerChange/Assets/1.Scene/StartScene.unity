@@ -3923,15 +3923,19 @@ MonoBehaviour:
   - fieldName: wheels[0].displayIndex
     dropdown: {fileID: 1147303882}
     row: {fileID: 391417992}
+    required: 0
   - fieldName: wheels[1].displayIndex
     dropdown: {fileID: 1785219623}
     row: {fileID: 195526889}
+    required: 0
   - fieldName: spectatorDisplayIndex
     dropdown: {fileID: 532392388}
     row: {fileID: 391753376}
+    required: 0
   - fieldName: operatorDisplayIndex
     dropdown: {fileID: 1194956095}
     row: {fileID: 1802308415}
+    required: 1
   alwaysOnTop: {fileID: 1673543696}
 --- !u!114 &192782636
 MonoBehaviour:

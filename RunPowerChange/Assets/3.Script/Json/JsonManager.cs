@@ -25,7 +25,7 @@ public class WheelConfig
     public int wheelId = 1;
     // 회전 센서 컨트롤러 id (port.json 의 controllerId)
     public int controllerId = 1;
-    // 32형 터치모니터 디스플레이 번호 (0 = Display 1)
+    // 32형 터치모니터 디스플레이 번호 (0 = Display 1, -1 = 사용 안함)
     public int displayIndex;
     // 장치 없이 시험할 때 누르고 있으면 달리는 키 (KeyCode 이름)
     public string simulateKey = "UpArrow";
@@ -157,7 +157,7 @@ public class GameDynamicData
         new WheelConfig { wheelId = 1, controllerId = 1, displayIndex = 0, simulateKey = "UpArrow" },
         new WheelConfig { wheelId = 2, controllerId = 2, displayIndex = 1, simulateKey = "W" },
     };
-    // 85형 관전 화면 디스플레이 번호
+    // 85형 관전 화면 디스플레이 번호 (-1 = 사용 안함)
     public int spectatorDisplayIndex = 2;
     // 설정창·RS232 디버그 패널·F1 도움말을 띄울 디스플레이 번호 (0 = Display 1). 관람객 32형 화면을 가리지 않게 85형 쪽(2 = Display 3).
     public int operatorDisplayIndex = 2;

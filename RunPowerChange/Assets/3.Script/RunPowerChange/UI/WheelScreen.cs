@@ -66,7 +66,7 @@ public class WheelScreen : MonoBehaviour
         foreach (var w in JsonManager.instance.gameDynamicData.wheels)
         {
             if (w == null || w.wheelId != session.WheelId) continue;
-            canvas.targetDisplay = Mathf.Max(0, w.displayIndex);
+            DisplayRouting.ApplyTo(canvas, w.displayIndex);
             return;
         }
         Debug.LogWarning($"{name}: Setting.json 에 wheelId {session.WheelId} 가 없어 Display {canvas.targetDisplay + 1} 그대로 사용");

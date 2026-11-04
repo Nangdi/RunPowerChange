@@ -44,14 +44,11 @@ public class UnityAlwaysOnTop : MonoBehaviour
             Debug.Log("에디터에서는 AlwaysOnTop 설정 생략");
             return;
         }
-        // 멀티 디스플레이 활성화
-        if (Display.displays.Length > 1)
+        // 멀티 디스플레이 활성화: 연결된 모니터 수만큼 모두 켠다 (설정창 드롭다운에 전부 나오도록).
+        // 화면을 끄는 것은 설정창의 "사용 안함"으로 한다. 켜진 모니터에 배정된 화면이 없으면 그 모니터는 검은 화면이다.
+        for (int i = 1; i < Display.displays.Length; i++)
         {
-            Display.displays[1].Activate();
-        }
-        if (Display.displays.Length > 2)
-        {
-            Display.displays[2].Activate();
+            Display.displays[i].Activate();
         }
 
         var jm = JsonManager.instance;

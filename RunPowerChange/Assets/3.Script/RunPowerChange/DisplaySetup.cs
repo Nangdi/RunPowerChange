@@ -5,9 +5,8 @@ using UnityEngine;
 // PC 1대에 32형 터치모니터 2대 + 85형 1대를 연결해 쓰므로, 화면이 그려지는 디스플레이를 켠다.
 // Display 1(0번)은 항상 켜져 있다. 해상도는 각 모니터 기본값을 그대로 쓴다 (코드로 강제하지 않음).
 //
-// 켜진 카메라나 Overlay 캔버스가 실제로 그리는 디스플레이만 Activate 한다.
-// 그릴 것이 없는 디스플레이를 켜면 그 모니터가 검은 화면으로 덮이기 때문이다
-// (예: 85형 관전 화면이 아직 없는데 spectatorDisplayIndex 를 켜면 85형이 검게 됨).
+// 빌드에서는 UnityAlwaysOnTop 이 연결된 모니터를 시작할 때 모두 켜고, 화면을 끄는 것은 설정창의 "사용 안함"으로 한다.
+// 여기서는 설정된 화면이 실제로 그려지는지 확인해 로그를 남기고, 아직 꺼져 있으면 켠다.
 // WheelScreen 이 Start 에서 캔버스 targetDisplay 를 Setting.json 값으로 바꾸므로 한 프레임 뒤에 확인한다.
 public class DisplaySetup : MonoBehaviour
 {
@@ -48,7 +47,7 @@ public class DisplaySetup : MonoBehaviour
         foreach (var cam in Camera.allCameras)
             if (cam.targetTexture == null) result.Add(cam.targetDisplay);
         foreach (var canvas in FindObjectsOfType<Canvas>())
-            if (canvas.isRootCanvas && canvas.renderMode == RenderMode.ScreenSpaceOverlay) result.Add(canvas.targetDisplay);
+            if (canvas.enabled && canvas.isRootCanvas && canvas.renderMode == RenderMode.ScreenSpaceOverlay) result.Add(canvas.targetDisplay);
         return result;
     }
 }

@@ -32,15 +32,16 @@ public class RaceCamera : MonoBehaviour
     private void ApplyDisplay()
     {
         var cam = GetComponent<Camera>();
-        if (cam != null) cam.targetDisplay = DisplayIndex(cam);
+        if (cam != null) DisplayRouting.ApplyTo(cam, DisplayIndex(cam));
     }
 
+    // 음수면 사용 안함 (카메라를 끈다)
     private int DisplayIndex(Camera cam)
     {
         var cfg = JsonManager.instance.gameDynamicData;
-        if (screen == Target.Spectator) return Mathf.Max(0, cfg.spectatorDisplayIndex);
+        if (screen == Target.Spectator) return cfg.spectatorDisplayIndex;
         foreach (var w in cfg.wheels)
-            if (w != null && w.wheelId == wheelId) return Mathf.Max(0, w.displayIndex);
+            if (w != null && w.wheelId == wheelId) return w.displayIndex;
         return cam.targetDisplay;
     }
 
