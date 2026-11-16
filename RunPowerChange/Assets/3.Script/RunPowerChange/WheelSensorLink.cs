@@ -5,7 +5,10 @@ using UnityEngine;
 // 쳇바퀴 1대의 센서 상태. 속도와 앱 시작 후 누적 이동거리를 들고 있다.
 // 세션은 시작 시점의 TotalDistanceM 을 기억해 두고 차이로 체험 거리를 계산한다.
 //
-// 센서는 쳇바퀴 안쪽 기어에 붙어 있어, 쳇바퀴 1회전에 신호(R1)가 pulsesPerRotation 개(현장 20개) 온다.
+// 센서는 쳇바퀴 안쪽 기어에 붙어 있어, 쳇바퀴 1회전에 회전 신호(R1)가 pulsesPerRotation 개(현장 20개) 온다.
+// 손잡이: 회전 신호와 따로, 손잡이를 잡으면 HOLD, 놓으면 FREE 가 상태가 바뀔 때 온다.
+// FREE 를 받으면 다음 HOLD 까지 "손잡이 놓음"(GripReleased)으로 본다 → 세션이 발전을 멈추고 경고를 띄운다.
+// 거리·속도는 손잡이 상태와 관계없이 R1 로 계산한다. 처음(아무 손잡이 신호도 받기 전)은 잡음으로 본다.
 // 신호 1개 = DistancePerPulseM (둘레 / pulsesPerRotation). 속도·거리는 여기에 속도 배율(speedMultiplier)을 곱한
 // 게임 값(GameDistancePerPulseM)으로 계산한다 (쳇바퀴가 무거워 실제 속도가 낮게 나오므로). 센서 튐 판정만 실제 값 기준.
 //  - 속도: 최근 speedWindowSeconds 동안 들어온 신호 수로 계산한다. 신호가 잦아(15km/h 에 초당 약 13개)
@@ -19,6 +22,10 @@ public class WheelSensor
     public int WheelId { get; }
     public int ControllerId { get; }
     public KeyCode SimulateKey { get; }
+    // 시뮬레이션 손잡이 잡음/놓음 전환 키 (HOLD/FREE 신호를 흉내 냄)
+    public KeyCode GripKey { get; }
+    // 손잡이를 놓은 상태인지 (FREE 를 받은 뒤 HOLD 를 받기 전)
+    public bool GripReleased { get; private set; }
 
     // 표시용으로 평활한 속도 (m/s)
     public float SpeedMps { get; private set; }
@@ -27,7 +34,7 @@ public class WheelSensor
     public double TotalDistanceM { get; private set; }
     // 회전 신호로 확인된 누적 이동거리 (m) = 신호 수 × 신호 1개 거리
     public double CountedDistanceM { get; private set; }
-    // 앱 시작 후 인식한 회전 신호(R1) 수 (쳇바퀴 회전 수가 아니라 기어 회전 수)
+    // 앱 시작 후 인식한 회전 신호(R/F) 수 (쳇바퀴 회전 수가 아니라 기어 회전 수)
     public long PulseCount { get; private set; }
     // 마지막으로 센서 메시지를 받은 시각 (Time.unscaledTime). 받은 적 없으면 -1.
     public float LastMessageTime { get; private set; } = -1f;
@@ -51,17 +58,34 @@ public class WheelSensor
     // 다음 신호가 예상 간격의 이 배수보다 늦어지면 그때부터 속도를 줄인다 (수신 시각 오차로 흔들리지 않게)
     private const float LateTolerance = 1.5f;
 
-    public WheelSensor(int wheelId, int controllerId, KeyCode simulateKey)
+    public WheelSensor(int wheelId, int controllerId, KeyCode simulateKey, KeyCode gripKey)
     {
         WheelId = wheelId;
         ControllerId = controllerId;
         SimulateKey = simulateKey;
+        GripKey = gripKey;
+    }
+
+    // 손잡이 신호 수신 (HOLD = 잡음, FREE = 놓음). 처리 결과를 문자열로 돌려준다.
+    public string ApplyGrip(float now, bool released)
+    {
+        LastMessageTime = now;
+        bool changed = GripReleased != released;
+        GripReleased = released;
+        string state = released ? "놓음(FREE) - 발전량 늘지 않음, 경고" : "잡음(HOLD) - 발전";
+        return $"손잡이 {state}{(changed ? "" : " (이미 같은 상태)")}";
     }
 
     // 회전 신호(R1) 1개 수신. 처리 결과를 문자열로 돌려준다 ("무시됨"으로 시작하면 버린 신호).
     public string ApplyPulse(float now, GameDynamicData cfg)
     {
         LastMessageTime = now;
+        // "무시됨" 판정이 앞부분을 보므로 손잡이 표시는 뒤에 붙인다
+        return ApplyRotation(now, cfg) + (GripReleased ? " [손잡이 놓음 상태 - 발전 안 함]" : "");
+    }
+
+    private string ApplyRotation(float now, GameDynamicData cfg)
+    {
         float d = cfg.DistancePerPulseM;          // 실제 거리 (센서 튐 판정용)
         float gameD = cfg.GameDistancePerPulseM;  // 게임 거리 (속도 배율 적용, 거리·속도용)
         float mult = cfg.SpeedMultiplier;
@@ -109,6 +133,13 @@ public class WheelSensor
     {
         if (SimulateKey != KeyCode.None && Input.GetKeyDown(SimulateKey)) SimulateTap(now, cfg);
         return TickSimulatedPulses(now, cfg);
+    }
+
+    // 시뮬레이션 손잡이 잡음/놓음 전환 키를 눌렀으면 HOLD/FREE 를 받은 것처럼 처리하고 결과를, 아니면 null
+    public string PollGripToggle(float now)
+    {
+        if (GripKey == KeyCode.None || !Input.GetKeyDown(GripKey)) return null;
+        return ApplyGrip(now, !GripReleased);
     }
 
     // 시뮬레이션 키 1번 = 쳇바퀴 1회전 (자동 플레이 시험에서도 쓴다)
@@ -177,17 +208,19 @@ public class WheelSensor
 // 쳇바퀴 회전 센서 컨트롤러와의 RS232 통신. 규약은 Docs/ControllerProtocol.md 참고.
 // SerialPortManager 대신 이 컴포넌트를 씬에 둔다.
 //
-// 컨트롤러 → PC : R1 (기어 1회전 = 쳇바퀴 1/pulsesPerRotation 회전), ERR,내용 / PONG
+// 컨트롤러 → PC : R1 (기어 1회전 = 쳇바퀴 1/pulsesPerRotation 회전, 손잡이와 무관) / HOLD (손잡이 잡음) / FREE (손잡이 놓음), ERR,내용 / PONG
 // PC → 컨트롤러 : PING (연결 확인용, 열린 모든 포트로)
 //
 // 컨트롤러 id 로 쳇바퀴를 구분한다: 쳇바퀴마다 컨트롤러가 1대씩 붙고 체험자가 따로 달리므로,
-// 같은 R1 신호라도 어느 포트로 들어왔는지에 따라 다른 쳇바퀴의 거리·속도로 더해야 한다.
+// 같은 R1/HOLD/FREE 신호라도 어느 포트로 들어왔는지에 따라 다른 쳇바퀴의 거리·속도로 더해야 한다.
 // 포트(port.json controllerId) → 쳇바퀴 연결은 Setting.json 의 wheels[].controllerId.
 //
 // 포트가 닫혀 있어도 Setting.json 의 simulateKey 로 달리기를 흉내 낼 수 있다.
 public class WheelSensorLink : SerialPortManager
 {
     public const string MsgRotation = "R1";
+    public const string MsgGripHold = "HOLD";
+    public const string MsgGripFree = "FREE";
     public const string MsgError = "ERR";
     public const string MsgPong = "PONG";
     public const string CmdPing = "PING";
@@ -223,7 +256,7 @@ public class WheelSensorLink : SerialPortManager
                 Debug.LogWarning($"중복된 wheelId 무시: {w.wheelId}");
                 continue;
             }
-            sensors.Add(new WheelSensor(w.wheelId, w.controllerId, ParseKey(w.simulateKey)));
+            sensors.Add(new WheelSensor(w.wheelId, w.controllerId, ParseKey(w.simulateKey), ParseKey(w.GripKeyName)));
         }
         if (sensors.Count == 0) Debug.LogError("Setting.json 에 쳇바퀴(wheels) 설정이 없습니다.");
     }
@@ -248,7 +281,10 @@ public class WheelSensorLink : SerialPortManager
     {
         base.Start();
         foreach (var s in Sensors)
+        {
             ShortcutHelp.Register(this, s.SimulateKey, $"쳇바퀴 {s.WheelId} 1바퀴 돌리기 (회전 신호 R1 을 1바퀴분 보냄, 누른 간격으로 속도 계산)", "모든 화면, 발전 중에만 기록됨");
+            ShortcutHelp.Register(this, s.GripKey, $"쳇바퀴 {s.WheelId} 손잡이 잡음/놓음 전환 (HOLD/FREE 신호 흉내, 놓음이면 발전량 멈춤 + 손잡이 경고)", "모든 화면, 경고는 발전 중에만");
+        }
     }
 
     protected override void OnDestroy()
@@ -264,6 +300,8 @@ public class WheelSensorLink : SerialPortManager
         EnsureSensors();
         foreach (var s in sensors)
         {
+            string gripNote = s.PollGripToggle(now);
+            if (gripNote != null) ReportInterpretation(s.ControllerId, $"[시뮬레이션] 쳇바퀴 {s.WheelId} {gripNote}", false);
             string simNote = s.TickSimulation(now, Config);
             if (simNote != null) ReportInterpretation(s.ControllerId, $"[시뮬레이션] 쳇바퀴 {s.WheelId} {simNote}", simNote.StartsWith("무시됨"));
             s.Tick(now, dt, Config);
@@ -290,7 +328,7 @@ public class WheelSensorLink : SerialPortManager
             return;
         }
 
-        if (head == MsgRotation)
+        if (head == MsgRotation || head == MsgGripHold || head == MsgGripFree)
         {
             var sensor = GetSensorByController(controllerId);
             if (sensor == null)
@@ -299,7 +337,8 @@ public class WheelSensorLink : SerialPortManager
                 return;
             }
 
-            string note = sensor.ApplyPulse(Time.unscaledTime, Config);
+            float now = Time.unscaledTime;
+            string note = head == MsgRotation ? sensor.ApplyPulse(now, Config) : sensor.ApplyGrip(now, head == MsgGripFree);
             ReportInterpretation(controllerId, $"쳇바퀴 {sensor.WheelId} {note}", note.StartsWith("무시됨"));
             return;
         }

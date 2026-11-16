@@ -14,6 +14,12 @@ using UnityEngine;
 public static class PowerPlayTest
 {
     private const string PendingKey = "PowerPlayTest.OutDir";
+    private const string Player2LeadsKey = "PowerPlayTest.Player2Leads";
+    private const string SequenceKey = "PowerPlayTest.Sequence";
+    private const string BigGapKey = "PowerPlayTest.BigGap";
+    private const string QuitKey = "PowerPlayTest.QuitTrailing";
+    private const string QuitLeadKey = "PowerPlayTest.QuitLeading";
+    private const string FollowKey = "PowerPlayTest.FollowScenario";
 
     private class Step
     {
@@ -59,6 +65,9 @@ public static class PowerPlayTest
     private static void RestoreRecords()
     {
         if (!SessionState.GetBool(BackupKey, false)) return;
+        // 시험을 막 시작해 플레이 모드로 들어가는 중이면 되돌리지 않는다. 바로 앞에 플레이 모드를 멈춘 경우 그 멈춤에 따른
+        // 되돌리기(delayCall)가 시험 시작보다 늦게 실행돼, 방금 떼어 둔 실제 기록을 다시 가져와 시험 기록이 섞인 적이 있다.
+        if (!string.IsNullOrEmpty(SessionState.GetString(PendingKey, ""))) return;
         foreach (var f in new List<string>(RecordFiles())) File.Delete(f);
         if (Directory.Exists(BackupDir))
             foreach (var f in Directory.GetFiles(BackupDir)) File.Move(f, Path.Combine(Application.persistentDataPath, Path.GetFileName(f)));
@@ -80,14 +89,127 @@ public static class PowerPlayTest
         };
     }
 
-    public static void Start(string dir)
+    // previousDayLeader: 오늘 기록 없이 전날 1위 기록(12km/h 로 달린 기록)만 있는 상태로 시작한다 (날이 바뀐 뒤 첫 대결 점검:
+    // 1위 기록 선 표시가 "전날 최고 랭킹"으로 나오고, 순위는 오늘 기록만 세는지)
+    // player2Leads: 2인 경주에서 쳇바퀴 2 가 빠르게 달린다 (오른쪽 레인 표시 점검)
+    // sequence: 2인 경주 동안 85형을 1초마다 캡처한다 (캡처하는 동안 화면이 멈춰 위치 기록(trace.csv)에 그만큼 튐이 생긴다)
+    // bigGap: 2인 경주를 20km/h 대 6km/h 로 달려 거리 차가 벌어지게 한다 (85형이 앞선 사람을 따라가고 추격 중 표시가 나오는지 점검)
+    // quitTrailing: 2인 경주 9초에 뒤처진 쪽이 멈춘다 (중도포기: spectatorQuitSeconds 뒤 85형이 앞선 사람 시점으로 바뀌는지 점검)
+    // quitLeading: 2인 경주 9초에 앞선 쪽이 멈춘다 (앞선 사람 중도포기: 뒤처진 사람 시점으로 바뀌고, 추월하면 다시 그 사람 시점인지 점검)
+    public static void Start(string dir, bool previousDayLeader = false, bool player2Leads = false, bool sequence = true, bool bigGap = false, bool quitTrailing = false, bool quitLeading = false)
     {
+        SessionState.SetBool(QuitLeadKey, quitLeading);
+        SessionState.SetBool(FollowKey, false);
+        SessionState.SetBool(BigGapKey, bigGap);
+        SessionState.SetBool(QuitKey, quitTrailing);
+        SessionState.SetBool(Player2LeadsKey, player2Leads);
+        SessionState.SetBool(SequenceKey, sequence);
         Directory.CreateDirectory(dir);
         foreach (var f in Directory.GetFiles(dir)) File.Delete(f);
         PlayerSettings.runInBackground = true;
+        SessionState.EraseString(PendingKey);   // 지난 시험이 플레이 모드에 못 들어가 남은 표시가 있으면 지운다 (아래 되돌리기가 건너뛰지 않게)
         BackupRecords();
+        if (previousDayLeader) WritePreviousDayLeader();
         SessionState.SetString(PendingKey, dir);
         EditorApplication.isPlaying = true;
+    }
+
+    // 85형 시점 전환 점검: 2인 경주 하나만 길게(100초) 달리며 아래 속도표대로 접전·역전·거리 차 벌어짐·따라잡기·한쪽 포기·
+    // 둘 다 멈춤을 차례로 만들고, 매 프레임 두 바퀴의 85형 화면 위치와 시점을 follow.csv 에 남긴다 (캡처 없음, 프레임 멈춤 없게).
+    public static void StartFollow(string dir)
+    {
+        Start(dir, false, false, false, false, false, false);
+        SessionState.SetBool(FollowKey, true);
+    }
+
+    // (달리기 시작 후 초, 쳇바퀴 1 km/h, 쳇바퀴 2 km/h)
+    private static readonly float[,] FollowScript =
+    {
+        { 0f, 12f, 11.5f },   // 접전 (거리 차 몇 m)
+        { 10f, 11f, 13f },    // 2 가 천천히 따라잡아 역전
+        { 22f, 0f, 12.5f },   // 1(뒤처짐) 잠깐 멈춤 → 포기 판정 → 앞선 사람(2) 시점
+        { 28f, 12.5f, 12f },  // 1 다시 달림 (거리 차는 기준보다 작음) → 바로 뒤처진 사람 시점으로 돌아와야 함
+        { 30f, 20f, 8f },     // 1 이 크게 앞섬 → 앞선 사람 시점
+        { 42f, 8f, 20f },     // 2 가 따라잡아 역전 → 뒤처진 사람 시점 → 다시 벌어지면 2 시점
+        { 58f, 0f, 12f },     // 1(뒤처짐) 포기
+        { 66f, 14f, 0f },     // 1 다시 달림, 2(앞섬) 포기 → 1 시점, 1 이 추월
+        { 80f, 0f, 0f },      // 둘 다 멈춤
+        { 86f, 13f, 13f },    // 둘 다 같은 속도
+    };
+
+    private static void BuildFollowSteps(GameDynamicData c)
+    {
+        c.runSeconds = 100f;
+        Add(1f, "follow_start_w1", () => Session(1).StartExperience());
+        Add(2.2f, "follow_start_w2", () => Session(2).StartExperience());
+        Add(4f, "follow_wait_run", () => Log("  [follow] 달리기 시작"), () => GameRound.Instance.Current == GameRound.Phase.Run);
+        // 시험 시계는 달리기 시작을 기다리는 동안 멈춰 있으므로, 시작 뒤 달리기 시간이 지난 시각에 끝을 확인한다
+        Add(4f + c.runSeconds + 2f, "follow_end", () => { Array.Clear(speedKmh, 0, speedKmh.Length); Log("  [follow] 달리기 끝"); },
+            () => GameRound.Instance.Current != GameRound.Phase.Run);
+        Add(4f + c.runSeconds + 3f, "finish", Finish);
+    }
+
+    private static void FollowSpeeds()
+    {
+        var round = GameRound.Instance;
+        if (round == null || round.Current != GameRound.Phase.Run) return;
+        float t = round.RunElapsed;
+        int row = 0;
+        for (int i = 0; i < FollowScript.GetLength(0); i++)
+            if (t >= FollowScript[i, 0]) row = i;
+        speedKmh[1] = FollowScript[row, 1];
+        speedKmh[2] = FollowScript[row, 2];
+    }
+
+    private static readonly StringBuilder followTrace = new StringBuilder();
+    private static Camera spectatorCamera;
+    private static int lastTraceFrame = -1;
+
+    private static void TraceFollow()
+    {
+        var round = GameRound.Instance;
+        var stage = RaceStage.Instance;
+        if (round == null || stage == null || round.Current != GameRound.Phase.Run) return;
+        if (Time.frameCount == lastTraceFrame) return;   // 에디터 업데이트가 한 프레임에 여러 번 불려도 한 줄만
+        lastTraceFrame = Time.frameCount;
+        if (spectatorCamera == null)
+            foreach (var rc in UnityEngine.Object.FindObjectsOfType<RaceCamera>())
+                if (rc.Screen == RaceCamera.Target.Spectator) spectatorCamera = rc.GetComponent<Camera>();
+        var spec = UnityEngine.Object.FindObjectOfType<SpectatorScreen>();
+        var so = spec != null ? new SerializedObject(spec) : null;
+        if (followTrace.Length == 0)
+            followTrace.AppendLine("frame,run,kmh1,kmh2,d1,d2,base,lead,cut,tq,lq,vy1,vy2,ahead1,ahead2,behind1,behind2,record");
+        string Active(string prop, int i)
+        {
+            var arr = so?.FindProperty(prop);
+            var m = arr != null && i < arr.arraySize ? arr.GetArrayElementAtIndex(i).objectReferenceValue as RectTransform : null;
+            return m != null && m.gameObject.activeSelf ? "1" : "0";
+        }
+        float Vy(int id)
+        {
+            if (spectatorCamera == null) return float.NaN;
+            Vector3 v = spectatorCamera.WorldToViewportPoint(stage.Runner(id).WheelCenterPoint);
+            return v.z <= 0f ? -9f : v.y;
+        }
+        followTrace.AppendLine($"{Time.frameCount},{round.RunElapsed:0.000},{speedKmh[1]:0.#},{speedKmh[2]:0.#}," +
+            $"{stage.Runner(1).DistanceM:0.00},{stage.Runner(2).DistanceM:0.00},{stage.SpectatorBase:0.00}," +
+            $"{(stage.SpectatorFollowingLeader ? 1 : 0)},{(stage.SpectatorCut ? 1 : 0)},{(stage.TrailingQuit ? 1 : 0)},{(stage.LeadingQuit ? 1 : 0)}," +
+            $"{Vy(1):0.0000},{Vy(2):0.0000},{Active("aheadMarkers", 0)},{Active("aheadMarkers", 1)},{Active("behindMarkers", 0)},{Active("behindMarkers", 1)},{Active("aheadMarkers", 2)}");
+    }
+
+    private static void WritePreviousDayLeader()
+    {
+        var track = new RaceTrack { ticks = DateTime.Now.AddDays(-1).Ticks, wheelId = 1, characterIndex = 0 };
+        float mps = 12f / 3.6f;
+        for (int i = 0; i <= 120; i++) track.samples.Add(i * RaceTrack.SampleSeconds * mps);
+        track.distanceM = track.samples[track.samples.Count - 1];
+        var data = new RaceRecordData
+        {
+            day = DateTime.Now.ToString("yyyy-MM-dd"),
+            previousDay = DateTime.Now.AddDays(-1).ToString("yyyy-MM-dd"),
+            previous = new List<RaceTrack> { track },
+        };
+        File.WriteAllText(Path.Combine(Application.persistentDataPath, "race_records.json"), JsonUtility.ToJson(data), new UTF8Encoding(false));
     }
 
     private static GameDynamicData Cfg => JsonManager.instance.gameDynamicData;
@@ -97,6 +219,7 @@ public static class PowerPlayTest
     {
         outDir = dir;
         log.Clear();
+        trace.Clear();
         steps.Clear();
         nextStep = 0;
         waitStart = -1;
@@ -104,7 +227,7 @@ public static class PowerPlayTest
 
         // 화면 하나씩 볼 시간만 남기고 줄인다 (메모리 값만 바꾸고 파일에는 저장하지 않는다)
         var c = Cfg;
-        c.joinWaitSeconds = 3f; c.readySeconds = 1.5f; c.guideSeconds = 2f; c.countdownSeconds = 3; c.runSeconds = 24f;
+        c.joinWaitSeconds = 3f; c.readySeconds = 1.5f; c.countdownSeconds = 3; c.runSeconds = 24f;
         c.saleSeconds = 4f; c.saleStepSeconds = 0.4f; c.resultAutoCloseSeconds = 3f; c.finishApproachSeconds = 8f; c.idleTimeoutSeconds = 30f;
         c.spectatorWinnerSeconds = 3f; c.spectatorRankingSeconds = 4f;
 
@@ -118,16 +241,31 @@ public static class PowerPlayTest
         Add(1f, "duo_start_w1", () => Session(1).StartExperience());
         Add(1.8f, "duo_join_screens", () => { Capture("01_join_w1_waiting", 1); Capture("02_join_w2_invite", 2); });
         Add(2.2f, "duo_start_w2", () => Session(2).StartExperience());
-        float guide = 2.2f + c.readySeconds;
-        float count = guide + c.guideSeconds;
+        float count = 2.2f + c.readySeconds;
         float run = count + c.countdownSeconds;
         Add(2.2f + c.readySeconds * 0.5f, "duo_ready", () => { Capture("03_ready_w1", 1); });
-        Add(guide + c.guideSeconds * 0.5f, "duo_guide", () => { Capture("04_guide_w1", 1); });
-        Add(count + 0.3f, "duo_count", () => { Capture("05_count_w1", 1); speedKmh[1] = 14f; speedKmh[2] = 9f; });
+        Add(count + 0.3f, "duo_count", () => { Capture("05_count_w1", 1); bool swap = SessionState.GetBool(Player2LeadsKey, false); bool big = SessionState.GetBool(BigGapKey, false);
+            float fast = big ? 20f : 14f, slow = big ? 6f : 9f;
+            speedKmh[1] = swap ? slow : fast; speedKmh[2] = swap ? fast : slow; });
         float t;
+        if (SessionState.GetBool(QuitKey, false) || SessionState.GetBool(QuitLeadKey, false))
+            Add(run + 9f, "duo_quit", () =>
+            {
+                bool p2Leads = SessionState.GetBool(Player2LeadsKey, false);
+                bool leading = SessionState.GetBool(QuitLeadKey, false);
+                int stop = leading ? (p2Leads ? 2 : 1) : (p2Leads ? 1 : 2);
+                speedKmh[stop] = 0f;
+                Log($"  [quit] 쳇바퀴 {stop} 멈춤 ({(leading ? "앞선" : "뒤처진")} 사람 중도포기 흉내)");
+            });
         Add(run + 1f, "duo_run_1s", () => { Capture("06_run_1s_w1", 1); Capture("06_run_1s_w2", 2); });
         Add(run + 8f, "duo_run_8s", () => { Capture("07_run_8s_w1", 1); Capture("07_run_8s_w2", 2); CaptureSpectator("07_spectator_run"); Check("run8"); });
-        Add(run + 18f, "duo_run_18s", () => { Capture("08_run_finish_w1", 1); Check("run18"); });
+        // 85형 앞서는 중 표시 확인용: 2인 경주 동안 1초마다 위쪽 캡처 (seq_xx.jpg)
+        for (int k = 0; k < (SessionState.GetBool(SequenceKey, true) ? 20 : 0); k++)
+        {
+            int n = k;
+            Add(run + 2f + k + 0.5f, $"spec_seq_{n:00}", () => { LogFollow($"seq_{n:00}"); CaptureSpectator($"seq_{n:00}"); });
+        }
+        Add(run + 18f, "duo_run_18s", () => { Capture("08_run_finish_w1", 1); CaptureSpectator("08_spectator_run_18s"); Check("run18"); });
         // 긴 프레임 멈춤 점검: 달리기 끝 3초 전에 에디터를 12초 멈춘다 (현장 PC 순간 멈춤 흉내).
         // 멈춘 뒤 첫 프레임에 달리기가 끝나도, 두 쳇바퀴 모두 남은 체험 시간만큼만 발전량이 더해져야 한다 (스크립트 실행 순서와 무관).
         Add(run + 20f, "duo_hitch", () => System.Threading.Thread.Sleep(12000),
@@ -148,7 +286,7 @@ public static class PowerPlayTest
         // ── 1인 체험 (빈 레인에 방금 기록 중 1위가 고스트로) ──
         t += 1f;
         Add(t, "solo_start_w2", () => Session(2).StartExperience(), () => GameRound.Instance.Current == GameRound.Phase.Idle);
-        count = t + c.joinWaitSeconds + c.readySeconds + c.guideSeconds;
+        count = t + c.joinWaitSeconds + c.readySeconds;
         Add(count + 0.3f, "solo_count", () => speedKmh[2] = 11f);
         run = count + c.countdownSeconds;
         Add(run + 6f, "solo_run", () => { Capture("13_solo_run_w2", 2); Capture("14_solo_busy_w1", 1); CaptureSpectator("13_spectator_solo"); Check("solo_run"); });
@@ -161,7 +299,7 @@ public static class PowerPlayTest
         t += 1f;
         int recordsBefore = 0;
         Add(t, "leave_start_w1", () => { recordsBefore = Session(1).Ranking.Count; Session(1).StartExperience(); }, () => GameRound.Instance.Current == GameRound.Phase.Idle);
-        run = t + c.joinWaitSeconds + c.readySeconds + c.guideSeconds + c.countdownSeconds;
+        run = t + c.joinWaitSeconds + c.readySeconds + c.countdownSeconds;
         Add(run + c.runSeconds + 0.5f, "leave_voltage", () => c.idleTimeoutSeconds = 3f, () => Session(1).Current == WheelSession.State.SelectVoltage);
         t = run + c.runSeconds + 0.5f + 4f;
         Add(t, "leave_idle", () =>
@@ -169,7 +307,44 @@ public static class PowerPlayTest
             bool ok = Session(1).Current == WheelSession.State.Idle && GameRound.Instance.Current == GameRound.Phase.Idle && Session(1).Ranking.Count == recordsBefore;
             Log($"  [leave] 무입력 복귀 {(ok ? "정상" : "실패")} - 기록 수 {recordsBefore} → {Session(1).Ranking.Count}");
         });
-        Add(t + 0.5f, "finish", Finish);
+        // ── 쳇바퀴 2 화면 사용 안 함: 캔버스·카메라가 꺼지고 시작이 무시되며, 85형에 점검 중으로 나와야 한다 (메모리 값만 바꿈) ──
+        int savedDisplay = 0;
+        Add(t + 0.5f, "disabled_w2", () =>
+        {
+            savedDisplay = Cfg.wheels[1].displayIndex;
+            Cfg.wheels[1].displayIndex = -1;
+            DisplayRouting.Apply(-1);
+            Session(2).StartExperience();
+        });
+        Add(t + 1.5f, "disabled_w2_check", () =>
+        {
+            Canvas canvas = null;
+            foreach (var ws in UnityEngine.Object.FindObjectsOfType<WheelScreen>(true))
+                if (ws.name.EndsWith("2")) canvas = ws.GetComponent<Canvas>();
+            Camera cam = null;
+            foreach (var rc in UnityEngine.Object.FindObjectsOfType<RaceCamera>(true))
+                if (rc.Screen == RaceCamera.Target.Wheel && rc.WheelId == 2) cam = rc.GetComponent<Camera>();
+            bool ok = Session(2).Current == WheelSession.State.Idle && !Session(2).Enabled
+                && canvas != null && !canvas.enabled && cam != null && !cam.enabled;
+            Log($"  [disabled] 쳇바퀴 2 사용 안 함 {(ok ? "정상" : "실패")} - 상태 {Session(2).Current}, 캔버스 {(canvas != null ? canvas.enabled.ToString() : "없음")}, 카메라 {(cam != null ? cam.enabled.ToString() : "없음")}");
+            CaptureSpectator("16_spectator_w2_disabled");
+            Cfg.wheels[1].displayIndex = savedDisplay;
+            DisplayRouting.Apply(savedDisplay);
+        });
+        Add(t + 2.5f, "disabled_w2_restore", () =>
+        {
+            Log($"  [disabled] 되돌림: 쳇바퀴 2 Enabled={Session(2).Enabled}");
+        });
+        Add(t + 3f, "finish", Finish);
+
+        // 85형 시점 전환 점검이면 위 시험 대신 긴 2인 경주 하나만
+        followTrace.Clear();
+        spectatorCamera = null;
+        if (SessionState.GetBool(FollowKey, false))
+        {
+            steps.Clear();
+            BuildFollowSteps(c);
+        }
 
         watchPhase = (GameRound.Phase)(-1);
         watchRound = 0;
@@ -185,7 +360,57 @@ public static class PowerPlayTest
         Log("시험 시작");
     }
 
-    private static void Add(float at, string name, Action action, Func<bool> until = null) => steps.Add(new Step { at = at, name = name, action = action, until = until });
+    private static void Add(float at, string name, Action action, Func<bool> until = null)
+    {
+        // 시각 순서대로 끼워 넣는다 (같은 시각이면 먼저 넣은 것이 먼저)
+        int i = steps.Count;
+        while (i > 0 && steps[i - 1].at > at) i--;
+        steps.Insert(i, new Step { at = at, name = name, action = action, until = until });
+    }
+
+    // 85형 앞서는 중 표시·선의 위치를 달리는 동안 매 업데이트 기록한다 (trace.csv). 흔들림을 수치로 보기 위해서다.
+    private static readonly StringBuilder trace = new StringBuilder();
+    private static void TraceAhead(float elapsed)
+    {
+        var round = GameRound.Instance;
+        if (round == null || round.Current != GameRound.Phase.Run) return;
+        var spec = UnityEngine.Object.FindObjectOfType<SpectatorScreen>();
+        if (spec == null) return;
+        var so = new SerializedObject(spec);
+        var markers = so.FindProperty("aheadMarkers");
+        if (trace.Length == 0) trace.AppendLine("t,run,i,marker,mx,my,dist1,dist2");
+        for (int i = 0; i < markers.arraySize; i++)
+        {
+            var m = markers.GetArrayElementAtIndex(i).objectReferenceValue as RectTransform;
+            if (m == null) continue;
+            trace.AppendLine($"{elapsed:0.000},{round.RunElapsed:0.000},{i},{(m.gameObject.activeSelf ? 1 : 0)},{m.anchoredPosition.x:0.0},{m.anchoredPosition.y:0.0}," +
+                $"{RaceStage.Instance.Runner(1).DistanceM:0.00},{RaceStage.Instance.Runner(2).DistanceM:0.00}");
+        }
+    }
+
+    // 85형 앞선 사람 따라가기 상태 (화면 기준 거리, 따라가는 중, 중도포기, 바퀴 화면 위치, 추격 중 표시)
+    private static void LogFollow(string tag)
+    {
+        var stage = RaceStage.Instance;
+        var spec = UnityEngine.Object.FindObjectOfType<SpectatorScreen>();
+        if (stage == null || spec == null) return;
+        var behind = new SerializedObject(spec).FindProperty("behindMarkers");
+        var sb = new StringBuilder($"  [follow {tag}] 거리 1={stage.Runner(1).DistanceM:0.0} 2={stage.Runner(2).DistanceM:0.0} 기준={stage.SpectatorBase:0.0} 앞선사람시점={stage.SpectatorFollowingLeader} 뒤포기={stage.TrailingQuit} 앞포기={stage.LeadingQuit}");
+        Camera cam = null;
+        foreach (var rc in UnityEngine.Object.FindObjectsOfType<RaceCamera>())
+            if (rc.Screen == RaceCamera.Target.Spectator) cam = rc.GetComponent<Camera>();
+        for (int id = 1; id <= 2; id++)
+        {
+            if (cam != null)
+            {
+                Vector3 v = cam.WorldToViewportPoint(stage.Runner(id).WheelCenterPoint);
+                sb.Append($" 바퀴{id} 화면y={v.y:0.00}{(v.z <= 0f ? "(카메라 뒤)" : "")}");
+            }
+            var m = behind.arraySize >= id ? behind.GetArrayElementAtIndex(id - 1).objectReferenceValue as RectTransform : null;
+            if (m != null && m.gameObject.activeSelf) sb.Append($" 추격표시{id}=\"{m.GetComponentInChildren<TMPro.TMP_Text>().text}\"");
+        }
+        Log(sb.ToString());
+    }
 
     // 조건을 기다리는 최대 시간(초). 넘으면 실패로 남기고 그대로 진행한다.
     private const float MaxWaitSeconds = 30f;
@@ -218,6 +443,8 @@ public static class PowerPlayTest
         }
 
         WatchSpectator();
+        TraceAhead(elapsed);
+        if (SessionState.GetBool(FollowKey, false)) { FollowSpeeds(); TraceFollow(); }
 
         while (nextStep < steps.Count && elapsed >= steps[nextStep].at)
         {
@@ -280,7 +507,6 @@ public static class PowerPlayTest
         {
             case GameRound.Phase.Open:
             case GameRound.Phase.Ready:
-            case GameRound.Phase.Guide:
                 ShotOnce(e >= 0.6f, prefix + r.Current.ToString().ToLower());
                 break;
             case GameRound.Phase.Countdown:
@@ -350,6 +576,19 @@ public static class PowerPlayTest
     private static void Check(string tag)
     {
         var stage = RaceStage.Instance;
+        var spec = UnityEngine.Object.FindObjectOfType<SpectatorScreen>();
+        if (spec != null)
+        {
+            var markers = new SerializedObject(spec).FindProperty("aheadMarkers");
+            var line = new StringBuilder($"  [{tag}] 85형 앞서는 중 표시:");
+            for (int i = 0; i < markers.arraySize; i++)
+            {
+                var m = markers.GetArrayElementAtIndex(i).objectReferenceValue as RectTransform;
+                if (m == null) continue;
+                line.Append($" {m.name}={(m.gameObject.activeSelf ? m.GetComponentInChildren<TMPro.TMP_Text>().text : "숨김")}");
+            }
+            Log(line.ToString());
+        }
         for (int id = 1; id <= 2; id++)
         {
             RaceRunner runner = stage.Runner(id);
@@ -364,7 +603,9 @@ public static class PowerPlayTest
             Log($"  [{tag}] lane{id} mode={runner.CurrentMode} dist={runner.DistanceM:0.0} speed={runner.SpeedMps:0.0} " +
                 $"charZ(화면1)={(character ? character.localPosition.z : 0):0.00} charZ(화면2)={(screen2 ? screen2.localPosition.z : 0):0.00} " +
                 $"wheelZ={(wheel ? wheel.localPosition.z : 0):0.00} anim={state} " +
-                $"viewport=({vp.x:0.00},{vp.y:0.00},{vp.z:0.0}) session={Session(id)?.DistanceM:0.0}m");
+                $"viewport=({vp.x:0.00},{vp.y:0.00},{vp.z:0.0}) session={Session(id)?.DistanceM:0.0}m " +
+                $"1위선(화면{id})={stage.ScreenRecordVisible(id)} z={(stage.ScreenRecordVisible(id) ? stage.ScreenRecordPoint(id).z : 0f):0.0} " +
+                $"지금순위={Session(id)?.LiveEnergyRank}/{Session(id)?.LiveTotal}");
         }
     }
 
@@ -415,6 +656,8 @@ public static class PowerPlayTest
     {
         EditorApplication.update -= Tick;
         File.WriteAllText(Path.Combine(outDir, "log.txt"), log.ToString(), new UTF8Encoding(false));
+        File.WriteAllText(Path.Combine(outDir, "trace.csv"), trace.ToString(), new UTF8Encoding(false));
+        if (followTrace.Length > 0) File.WriteAllText(Path.Combine(outDir, "follow.csv"), followTrace.ToString(), new UTF8Encoding(false));
         File.WriteAllText(Path.Combine(outDir, "done.txt"), "done");
         EditorApplication.isPlaying = false;
     }

@@ -21,7 +21,9 @@ using static PowerUIKit;
 //   └ Frame (2160x3840) └ Panel_Spectator.prefab (상태·발전량 글자, 오늘 최고 랭킹 표시, 아래 칸 3개, 안내 카드·카운트다운 Notice)
 //
 // 이미 있는 프리팹은 덮어쓰지 않는다. 직접 수정한 프리팹을 지키기 위해서다.
-// (뒤에 추가된 85형 안내 카드는 예외로, 예전 프리팹에 없으면 그 부분만 덧붙인다: EnsureSpectatorNotice)
+// (뒤에 추가된 요소는 예외로, 예전 프리팹에 없으면 그 부분만 덧붙인다:
+//  85형 안내 카드 EnsureSpectatorNotice, 85형 랭킹 표 PLAYER 줄 순위 숫자 EnsureSpectatorPlayerRows,
+//  32형 발전 화면의 지금 순위·1위 기록 선 표시 EnsureRunExtras)
 // 구조가 바뀌어 처음부터 다시 만들려면 BuildAll(rebuild: true) 를 쓴다 (같은 경로에 덮어써서 GUID 유지).
 public static class PowerPrefabBuilder
 {
@@ -49,7 +51,6 @@ public static class PowerPrefabBuilder
             {
                 { "Idle", CreateIdlePanel },
                 { "Join", CreateJoinPanel },
-                { "Guide", CreateGuidePanel },
                 { "Countdown", CreateCountdownPanel },
                 { "Run", CreateRunPanel },
                 { "Voltage", CreateVoltagePanel },
@@ -60,12 +61,17 @@ public static class PowerPrefabBuilder
             var panels = new List<GameObject>();
             foreach (string panel in PanelNames)
                 panels.Add(GetOrCreate(PanelPrefabPath(panel), panelBuilders[panel]));
+            EnsureRunExtras();
             GameObject canvasPrefab = GetOrCreate(CanvasPrefabPath, () => CreateCanvas(panels));
 
             screen = SpectatorResolution;
             GameObject spectatorPanel = GetOrCreate(PanelPrefabPath(SpectatorName), CreateSpectatorPanel);
             GameObject spectatorPrefab = GetOrCreate(SpectatorPrefabPath, () => CreateSpectatorCanvas(spectatorPanel));
             EnsureSpectatorNotice();
+            EnsureSpectatorPlayerRows();
+            EnsureRecordTagViews();
+            EnsureAheadMarkers();
+            EnsureBehindMarkers();
             screen = ReferenceResolution;
 
             ApplyToScene(canvasPrefab);
@@ -309,14 +315,6 @@ public static class PowerPrefabBuilder
         return panel.gameObject;
     }
 
-    private static GameObject CreateGuidePanel()
-    {
-        RectTransform panel = CreatePanelRoot("Guide");
-        var view = panel.gameObject.AddComponent<GuidePanel>();
-        CreateAutoGauge(panel, view, "Guide_Gauge");
-        return panel.gameObject;
-    }
-
     private static GameObject CreateCountdownPanel()
     {
         RectTransform panel = CreatePanelRoot("Countdown");
@@ -367,6 +365,8 @@ public static class PowerPrefabBuilder
             WhiteColor, Weight.SemiBold);
         compare.enableWordWrapping = false;
         compareBox.gameObject.SetActive(false);
+        var (rankGroup, rankText) = CreateRunRank(panel);
+        RectTransform recordTag = CreateRunRecordTag(panel);
 
         Image shine = FilledImage(panel, "BarShine", "Run_BarShine");
         GaugeView bar = CreateGauge(panel, "EnergyBar", "Run_BarFill", null, shine);
@@ -375,7 +375,12 @@ public static class PowerPrefabBuilder
         TMP_Text energy = PsdText(panel, "EnergyText", "Run_BarText", "0.0", 45, WhiteColor, Weight.ExtraBold,
             HorizontalAlignmentOptions.Right, 360f, true);
 
+        HandWarningView warning = CreateHandWarning(panel);
+
         var view = panel.gameObject.AddComponent<RunPanel>();
+        Wire(view, ("handWarning", warning));
+        Wire(view, ("rankGroup", rankGroup), ("rankText", rankText), ("recordTag", recordTag), ("recordTagView", recordTag.GetComponent<RecordTagView>()));
+        WireColor(view, ("rankColor", YellowColor));
         Wire(view,
             ("speedText", speed),
             ("needle", needle.rectTransform),
@@ -389,6 +394,186 @@ public static class PowerPrefabBuilder
         WireList(view, "meTags", Objects(meL, meR));
         WireList(view, "otherTags", Objects(otherL, otherR));
         return panel.gameObject;
+    }
+
+    // 지금 순위 ("지금 기록이면 N명 중 M등"): 상대와 거리 차 상자 바로 아래
+    private static (GameObject group, TMP_Text text) CreateRunRank(RectTransform panel)
+    {
+        Image box = RoundBox(panel, "Group_Rank", new Vector2(960f, 146f), new Vector2(620f, 60f));
+        TMP_Text text = AddText(StretchFull(CreateRect("Text", box.rectTransform)), $"지금 기록이면 12명 중 <color={YellowHex}>3등</color>이에요!", 32,
+            WhiteColor, Weight.SemiBold);
+        text.enableWordWrapping = false;
+        box.gameObject.SetActive(false);
+        return (box.gameObject, text);
+    }
+
+    // 1위 기록 선 위 "오늘 최고 랭킹" 표시 (85형과 같은 그림을 32형 크기로 줄임). 아래 끝(기둥 끝)이 피벗.
+    // 3D 장면 바로 위·다른 표시 아래에 오도록 StaticLayer 바로 다음에 둔다.
+    private static RectTransform CreateRunRecordTag(RectTransform panel)
+    {
+        Image tag = AddSprite(Place(CreateRect("RecordTag", panel), Vector2.zero, new Vector2(216f, 132f)), Part("Spectator_RecordTag"));
+        tag.preserveAspect = true;
+        tag.raycastTarget = false;
+        tag.rectTransform.pivot = new Vector2(0.5f, 0f);
+        tag.transform.SetSiblingIndex(1);
+        tag.gameObject.SetActive(false);
+        AddRecordTagView(tag);
+        return tag.rectTransform;
+    }
+
+    // 1위 기록 선 표시에 오늘/전날 그림 바꾸기를 붙인다 (전날 그림: Tools/make_record_tag_prev.py)
+    private static RecordTagView AddRecordTagView(Image tag)
+    {
+        var view = tag.GetComponent<RecordTagView>();
+        if (view == null) view = tag.gameObject.AddComponent<RecordTagView>();   // 에디터의 가짜 null 때문에 ?? 를 쓰지 않는다
+        Wire(view, ("image", tag), ("todaySprite", Part("Spectator_RecordTag")), ("previousDaySprite", Part("Spectator_RecordTag_Prev")));
+        return view;
+    }
+
+    // 예전에 만든 프리팹의 1위 기록 선 표시에 RecordTagView 가 없으면 붙이고 연결한다 (32형 Panel_Run, 85형 Panel_Spectator·Canvas_Spectator)
+    private static void EnsureRecordTagViews()
+    {
+        string runPath = PanelPrefabPath("Run");
+        GameObject run = PrefabUtility.LoadPrefabContents(runPath);
+        try
+        {
+            var view = run.GetComponent<RunPanel>();
+            var tag = view != null ? new SerializedObject(view).FindProperty("recordTag").objectReferenceValue as RectTransform : null;
+            if (tag != null && new SerializedObject(view).FindProperty("recordTagView").objectReferenceValue == null)
+            {
+                Wire(view, ("recordTagView", AddRecordTagView(tag.GetComponent<Image>())));
+                PrefabUtility.SaveAsPrefabAsset(run, runPath);
+                Debug.Log($"발전 화면 1위 기록 선 표시 오늘/전날 그림 연결: {runPath}");
+            }
+        }
+        finally
+        {
+            PrefabUtility.UnloadPrefabContents(run);
+        }
+
+        string specPath = PanelPrefabPath(SpectatorName);
+        GameObject spec = PrefabUtility.LoadPrefabContents(specPath);
+        try
+        {
+            Transform tag = spec.transform.Find("RecordTag");
+            if (tag != null && tag.GetComponent<RecordTagView>() == null)
+            {
+                AddRecordTagView(tag.GetComponent<Image>());
+                PrefabUtility.SaveAsPrefabAsset(spec, specPath);
+                Debug.Log($"85형 1위 기록 선 표시 오늘/전날 그림 추가: {specPath}");
+            }
+        }
+        finally
+        {
+            PrefabUtility.UnloadPrefabContents(spec);
+        }
+
+        GameObject canvasRoot = PrefabUtility.LoadPrefabContents(SpectatorPrefabPath);
+        try
+        {
+            var screenView = canvasRoot.GetComponent<SpectatorScreen>();
+            var tagView = canvasRoot.GetComponentInChildren<RecordTagView>(true);
+            if (screenView != null && tagView != null && new SerializedObject(screenView).FindProperty("recordTagView").objectReferenceValue != tagView)
+            {
+                Wire(screenView, ("recordTagView", tagView));
+                PrefabUtility.SaveAsPrefabAsset(canvasRoot, SpectatorPrefabPath);
+                Debug.Log($"85형 1위 기록 선 표시 연결: {SpectatorPrefabPath}");
+            }
+        }
+        finally
+        {
+            PrefabUtility.UnloadPrefabContents(canvasRoot);
+        }
+    }
+
+    // 이미 만든 Panel_Run 프리팹에 지금 순위·1위 기록 선 표시가 없으면 추가하고 RunPanel 에 연결한다 (다른 부분은 건드리지 않음)
+    private static void EnsureRunExtras()
+    {
+        string path = PanelPrefabPath("Run");
+        GameObject root = PrefabUtility.LoadPrefabContents(path);
+        try
+        {
+            var view = root.GetComponent<RunPanel>();
+            if (view == null) return;
+            var panel = (RectTransform)root.transform;
+            var so = new SerializedObject(view);
+            bool changed = false;
+            if (so.FindProperty("rankGroup").objectReferenceValue == null)
+            {
+                var (group, text) = CreateRunRank(panel);
+                Transform compare = panel.Find("Group_Compare");
+                if (compare != null) group.transform.SetSiblingIndex(compare.GetSiblingIndex() + 1);
+                Wire(view, ("rankGroup", group), ("rankText", text));
+                WireColor(view, ("rankColor", YellowColor));
+                changed = true;
+            }
+            if (so.FindProperty("recordTag").objectReferenceValue == null)
+            {
+                Wire(view, ("recordTag", CreateRunRecordTag(panel)));
+                changed = true;
+            }
+            if (changed)
+            {
+                PrefabUtility.SaveAsPrefabAsset(root, path);
+                Debug.Log($"발전 화면 지금 순위·1위 기록 선 표시 추가: {path}");
+            }
+        }
+        finally
+        {
+            PrefabUtility.UnloadPrefabContents(root);
+        }
+    }
+
+    // 손잡이를 놓았을 때(FREE) 경고: 빨간 테두리(맥박) + PSD 경고문구(어두운 바탕, 손잡이 그림, 문구, 깜빡이는 아이콘).
+    // 발전 화면의 다른 요소 위에 덮이도록 맨 마지막 자식으로 둔다.
+    private static HandWarningView CreateHandWarning(RectTransform panel)
+    {
+        CanvasGroup group = Group(panel, "Group_HandWarning");
+        group.alpha = 0f;
+        group.interactable = false;
+        group.blocksRaycasts = false;
+        var root = (RectTransform)group.transform;
+
+        Image edge = PartImage(root, "RedEdge", "Warn_RedEdge");
+        edge.preserveAspect = false;
+        edge.color = WarnRedColor;
+        PartImage(root, "Dim", "Warn_Dim");
+
+        // 손잡이 그림·문구는 같이 살짝 커졌다 작아진다 (화면 가운데 기준)
+        RectTransform pulse = StretchFull(CreateRect("Pulse", root));
+        PartImage(pulse, "Hands", "Warn_Hands");
+        PartImage(pulse, "Text", "Warn_Text");
+        Image icon = PartImage(pulse, "Icon", "Warn_Icon");
+
+        foreach (var g in root.GetComponentsInChildren<Graphic>(true)) g.raycastTarget = false;
+
+        var view = root.gameObject.AddComponent<HandWarningView>();
+        Wire(view, ("redEdge", edge), ("icon", icon), ("pulseTarget", pulse));
+        root.SetAsLastSibling();
+        return view;
+    }
+
+    // 이미 만든 Panel_Run 프리팹에 손잡이 경고가 없으면 추가하고 RunPanel 에 연결한다 (다른 부분은 건드리지 않음).
+    [MenuItem("Tools/달려라 전력 챌린지/손잡이 경고 추가 (Panel_Run)")]
+    public static void EnsureHandWarning()
+    {
+        string path = PanelPrefabPath("Run");
+        ReloadLayout();
+        screen = ReferenceResolution;
+        GameObject root = PrefabUtility.LoadPrefabContents(path);
+        try
+        {
+            var run = root.GetComponent<RunPanel>();
+            var existing = root.GetComponentInChildren<HandWarningView>(true);
+            if (existing == null) existing = CreateHandWarning((RectTransform)root.transform);
+            Wire(run, ("handWarning", existing));
+            PrefabUtility.SaveAsPrefabAsset(root, path);
+            Debug.Log($"손잡이 경고 연결: {path}");
+        }
+        finally
+        {
+            PrefabUtility.UnloadPrefabContents(root);
+        }
     }
 
     private static GameObject CreateVoltagePanel()
@@ -515,12 +700,16 @@ public static class PowerPrefabBuilder
 
         Image tag = PartImage(panel, "RecordTag", "Spectator_RecordTag");
         tag.gameObject.SetActive(false);
+        AddRecordTagView(tag);
+        CreateSpectatorTitle(panel);
+        CreateAheadMarkers(panel);
+        CreateBehindMarkers(panel);
 
         // 아래 칸 3개 (같은 자리에 겹쳐 두고 번갈아 보여 준다)
         CanvasGroup ranking = Group(panel, "Bottom_1_Ranking");
         PartImage((RectTransform)ranking.transform, "Board", "Spectator_Ranking");
-        CreateRankTable((RectTransform)ranking.transform, "Table_Energy", "Spec_E", "Spec_E", 116.5f, 32f, 54.5f, false);
-        CreateRankTable((RectTransform)ranking.transform, "Table_Sale", "Spec_S", "Spec_E", 116.5f, 32f, 54.5f, false);
+        AddPlayerRowRanks(CreateRankTable((RectTransform)ranking.transform, "Table_Energy", "Spec_E", "Spec_E", 116.5f, 32f, 54.5f, false), SpecEnergyRankX);
+        AddPlayerRowRanks(CreateRankTable((RectTransform)ranking.transform, "Table_Sale", "Spec_S", "Spec_E", 116.5f, 32f, 54.5f, false), SpecSaleRankX);
 
         CanvasGroup info1 = Group(panel, "Bottom_2_Info");
         PartImage((RectTransform)info1.transform, "Board", "Spectator_Info_1");
@@ -535,8 +724,334 @@ public static class PowerPrefabBuilder
         return panel.gameObject;
     }
 
+    // 85형: 바퀴·1위 기록 선이 실제 거리만큼 앞서 화면 위로 완전히 나가면 띄우는 표시. 다른 게임처럼 화면 맨 위에
+    // 레인 색 화살표(▲)와 "PLAYER 01 63m 앞서는 중" 상자를 두고, x 만 대상 자리를 따라간다 (SpectatorScreen).
+    // 레인 표시는 첫째 줄, 1위 기록 선 표시는 둘째 줄 (둘이 함께 떠도 겹치지 않게).
+    private static readonly string[] AheadMarkerNames = { "Ahead_1", "Ahead_2", "Ahead_Record" };
+    private static readonly float[] AheadMarkerPsdY = { 125f, 290f, 290f };   // 묶음(화살표 + 상자) 가운데 높이
+    private static readonly float[] AheadMarkerWidth = { 640f, 640f, 720f };
+    private static Color AheadLineColor(int i) => i == 0 ? Player1Color : i == 1 ? Player2Color : RecordLineColor;
+
+    private static void CreateAheadMarkers(RectTransform panel)
+    {
+        // 2인 경주에서 레인 표시는 앞선 한 쪽만 뜨므로 쳇바퀴 1·2 는 같은 줄, 1위 기록 선은 둘째 줄
+        float[] rowY = { AheadMarkerPsdY[0], AheadMarkerPsdY[0], AheadMarkerPsdY[2] };
+        Sprite arrow = Part("Spectator_AheadArrow");   // 흰 삼각형 (Tools/make_ahead_arrow.py), 레인 색으로 칠함
+        Sprite rounded = AssetDatabase.GetBuiltinExtraResource<Sprite>("UI/Skin/UISprite.psd");
+        for (int i = 0; i < AheadMarkerNames.Length; i++)
+        {
+            const float boxH = 90f, arrowH = 56f, gap = 10f;
+            RectTransform root = Place(CreateRect(AheadMarkerNames[i], panel), PsdPoint(new Vector2(1080f, rowY[i]), screen),
+                new Vector2(AheadMarkerWidth[i], boxH + gap + arrowH));
+
+            // 위쪽 화살표
+            AddSprite(Place(CreateRect("Arrow", root), new Vector2(0f, (boxH + gap) * 0.5f), new Vector2(84f, arrowH)), arrow, AheadLineColor(i));
+
+            Image box = AddSprite(Place(CreateRect("Box", root), new Vector2(0f, -(arrowH + gap) * 0.5f), new Vector2(AheadMarkerWidth[i], boxH)),
+                rounded, new Color(TextColor.r, TextColor.g, TextColor.b, 0.85f));
+            box.type = Image.Type.Sliced;
+            box.pixelsPerUnitMultiplier = 0.1f;
+            TMP_Text text = AddText(StretchFull(CreateRect("Text", box.rectTransform)),
+                i == 2 ? $"오늘 최고 랭킹 <color={YellowHex}>63m</color> 앞" : $"PLAYER 0{i + 1} <color={YellowHex}>63m</color> 앞서는 중", 48, WhiteColor, Weight.SemiBold);
+            text.enableWordWrapping = false;
+            foreach (var g in root.GetComponentsInChildren<Graphic>(true)) g.raycastTarget = false;
+            root.gameObject.SetActive(false);
+        }
+        Transform notice = panel.Find("Notice");
+        if (notice != null) notice.SetAsLastSibling();   // 안내 카드는 맨 위
+    }
+
+    // 85형이 앞선 사람을 따라갈 때 화면 아래로 빠진 뒤처진 바퀴 표시. 아래 칸(PSD y 약 3070) 바로 위에
+    // "PLAYER 02 60m 추격 중" 상자와 아래쪽 화살표(▼)를 두고, x 는 그 레인 자리 (SpectatorScreen.UpdateBehindMarkers).
+    private static readonly string[] BehindMarkerNames = { "Behind_1", "Behind_2" };
+    private const float BehindMarkerPsdY = 2970f;   // 묶음(상자 + 화살표) 가운데 높이
+
+    private static void CreateBehindMarkers(RectTransform panel)
+    {
+        Sprite arrow = Part("Spectator_AheadArrow");
+        Sprite rounded = AssetDatabase.GetBuiltinExtraResource<Sprite>("UI/Skin/UISprite.psd");
+        for (int i = 0; i < BehindMarkerNames.Length; i++)
+        {
+            const float boxH = 90f, arrowH = 56f, gap = 10f, width = 640f;
+            RectTransform root = Place(CreateRect(BehindMarkerNames[i], panel), PsdPoint(new Vector2(1080f, BehindMarkerPsdY), screen),
+                new Vector2(width, boxH + gap + arrowH));
+
+            Image box = AddSprite(Place(CreateRect("Box", root), new Vector2(0f, (arrowH + gap) * 0.5f), new Vector2(width, boxH)),
+                rounded, new Color(TextColor.r, TextColor.g, TextColor.b, 0.85f));
+            box.type = Image.Type.Sliced;
+            box.pixelsPerUnitMultiplier = 0.1f;
+            TMP_Text text = AddText(StretchFull(CreateRect("Text", box.rectTransform)),
+                $"PLAYER 0{i + 1} <color={YellowHex}>60m</color> 추격 중", 48, WhiteColor, Weight.SemiBold);
+            text.enableWordWrapping = false;
+
+            // 아래쪽 화살표 (위쪽 화살표 그림을 뒤집음)
+            RectTransform arrowRect = Place(CreateRect("Arrow", root), new Vector2(0f, -(boxH + gap) * 0.5f), new Vector2(84f, arrowH));
+            AddSprite(arrowRect, arrow, AheadLineColor(i));
+            arrowRect.localEulerAngles = new Vector3(0f, 0f, 180f);
+
+            foreach (var g in root.GetComponentsInChildren<Graphic>(true)) g.raycastTarget = false;
+            root.gameObject.SetActive(false);
+        }
+        Transform notice = panel.Find("Notice");
+        if (notice != null) notice.SetAsLastSibling();   // 안내 카드는 맨 위
+    }
+
+    private static void WireBehindMarkers(Transform panel, SpectatorScreen view)
+    {
+        int n = BehindMarkerNames.Length;
+        var markers = new UnityEngine.Object[n];
+        var texts = new UnityEngine.Object[n];
+        for (int i = 0; i < n; i++)
+        {
+            Transform m = panel.Find(BehindMarkerNames[i]);
+            markers[i] = m;
+            texts[i] = m != null ? m.Find("Box/Text").GetComponent<TMP_Text>() : null;
+        }
+        WireList(view, "behindMarkers", markers);
+        WireList(view, "behindTexts", texts);
+    }
+
+    // 예전에 만든 85형 프리팹에 추격 중 표시가 없으면 만들고 SpectatorScreen 에 연결한다
+    private static void EnsureBehindMarkers()
+    {
+        string panelPath = PanelPrefabPath(SpectatorName);
+        GameObject panelRoot = PrefabUtility.LoadPrefabContents(panelPath);
+        Vector2 previousScreen = screen;
+        screen = SpectatorResolution;   // 85형 좌표 (따로 불려도 32형 기준으로 놓이지 않게)
+        try
+        {
+            if (panelRoot.transform.Find(BehindMarkerNames[0]) == null)
+            {
+                CreateBehindMarkers((RectTransform)panelRoot.transform);
+                PrefabUtility.SaveAsPrefabAsset(panelRoot, panelPath);
+                Debug.Log($"85형 추격 중 표시 추가: {panelPath}");
+            }
+        }
+        finally
+        {
+            screen = previousScreen;
+            PrefabUtility.UnloadPrefabContents(panelRoot);
+        }
+
+        GameObject canvasRoot = PrefabUtility.LoadPrefabContents(SpectatorPrefabPath);
+        try
+        {
+            var view = canvasRoot.GetComponent<SpectatorScreen>();
+            Transform panel = canvasRoot.transform.Find("Frame").GetChild(0);
+            var markers = view != null ? new SerializedObject(view).FindProperty("behindMarkers") : null;
+            if (markers != null && (markers.arraySize == 0 || markers.GetArrayElementAtIndex(0).objectReferenceValue == null))
+            {
+                WireBehindMarkers(panel, view);
+                PrefabUtility.SaveAsPrefabAsset(canvasRoot, SpectatorPrefabPath);
+                Debug.Log($"85형 추격 중 표시 연결: {SpectatorPrefabPath}");
+            }
+        }
+        finally
+        {
+            PrefabUtility.UnloadPrefabContents(canvasRoot);
+        }
+    }
+
+    private static void WireAheadMarkers(Transform panel, SpectatorScreen view)
+    {
+        int n = AheadMarkerNames.Length;
+        var markers = new UnityEngine.Object[n];
+        var texts = new UnityEngine.Object[n];
+        for (int i = 0; i < n; i++)
+        {
+            Transform m = panel.Find(AheadMarkerNames[i]);
+            markers[i] = m;
+            texts[i] = m != null ? m.Find("Box/Text").GetComponent<TMP_Text>() : null;
+        }
+        WireList(view, "aheadMarkers", markers);
+        WireList(view, "aheadTexts", texts);
+        WireColor(view, ("aheadColor", YellowColor));
+    }
+
+    // 85형 제목(달려라! 전력 챌린지). 정적 그림에서 빼서 따로 두고 달리는 동안 숨긴다 (SpectatorScreen.titleGroup)
+    private static CanvasGroup CreateSpectatorTitle(RectTransform panel)
+    {
+        CanvasGroup group = Group(panel, "Group_Title");
+        PartImage((RectTransform)group.transform, "Title", "Spectator_Title");
+        group.interactable = false;
+        group.blocksRaycasts = false;
+        group.transform.SetSiblingIndex(1);   // 정적 그림 바로 위
+        return group;
+    }
+
+    // 예전에 만든 85형 프리팹에 화면 밖 표시(화살표)·제목 묶음이 없으면 다시 만들고 SpectatorScreen 에 연결한다.
+    // (앞 버전 표시: 움직이는 상자, 세로선·점 달린 상자는 지우고 새로 만든다)
+    private static void EnsureAheadMarkers()
+    {
+        string panelPath = PanelPrefabPath(SpectatorName);
+        GameObject panelRoot = PrefabUtility.LoadPrefabContents(panelPath);
+        try
+        {
+            bool changed = false;
+            Image oldArrow = panelRoot.transform.Find($"{AheadMarkerNames[0]}/Arrow")?.GetComponent<Image>();
+            if (oldArrow == null || oldArrow.sprite != Part("Spectator_AheadArrow"))
+            {
+                foreach (string name in AheadMarkerNames)
+                    foreach (string suffix in new[] { "", "_Line", "_Dot" })
+                    {
+                        Transform old = panelRoot.transform.Find(name + suffix);
+                        if (old != null) UnityEngine.Object.DestroyImmediate(old.gameObject);
+                    }
+                CreateAheadMarkers((RectTransform)panelRoot.transform);
+                changed = true;
+            }
+            if (panelRoot.transform.Find("Group_Title") == null)
+            {
+                CreateSpectatorTitle((RectTransform)panelRoot.transform);
+                changed = true;
+            }
+            if (changed)
+            {
+                PrefabUtility.SaveAsPrefabAsset(panelRoot, panelPath);
+                Debug.Log($"85형 화면 밖 표시·제목 묶음 추가: {panelPath}");
+            }
+        }
+        finally
+        {
+            PrefabUtility.UnloadPrefabContents(panelRoot);
+        }
+
+        GameObject canvasRoot = PrefabUtility.LoadPrefabContents(SpectatorPrefabPath);
+        try
+        {
+            var view = canvasRoot.GetComponent<SpectatorScreen>();
+            Transform panel = canvasRoot.transform.Find("Frame").GetChild(0);
+            var so = view != null ? new SerializedObject(view) : null;
+            var markers = so?.FindProperty("aheadMarkers");
+            bool rewire = so != null && (markers.arraySize == 0 || markers.GetArrayElementAtIndex(0).objectReferenceValue == null
+                || so.FindProperty("titleGroup").objectReferenceValue == null);
+            if (rewire)
+            {
+                WireAheadMarkers(panel, view);
+                Wire(view, ("titleGroup", panel.Find("Group_Title").GetComponent<CanvasGroup>()));
+                PrefabUtility.SaveAsPrefabAsset(canvasRoot, SpectatorPrefabPath);
+                Debug.Log($"85형 화면 밖 표시·제목 묶음 연결: {SpectatorPrefabPath}");
+            }
+        }
+        finally
+        {
+            PrefabUtility.UnloadPrefabContents(canvasRoot);
+        }
+    }
+
+    // 85형 랭킹 판 그림(Spectator_Ranking) 안 줄 순위 숫자 자리 (판 그림 기준 px). 4·5줄 숫자는 psd_export.py 가 지웠다.
+    private const float SpecEnergyRankX = 82f;
+    private const float SpecSaleRankX = 1113f;
+    private static readonly float[] SpecPlayerRowY = { 508f, 625f };
+
+    // 85형 랭킹 표 아래 두 줄(4·5위)의 순위 숫자 글자와 PLAYER 줄 강조. 순위가 그때마다 달라서 그림 대신 글자로 쓴다.
+    // 평소에는 4·5위 기록 줄이고, 종합 순위 발표 중에만 PLAYER 줄이 된다: 레인 색 바탕 띠(옅게) + 순위 숫자 뒤 동그라미
+    // (1위 줄 동그라미처럼) + 굵고 큰 이름 글자. 띠·동그라미는 꺼 두고 실행 중 RankTableView.SetRow 가 켜고 칠한다.
+    private const float SpecRowBandWidth = 900f;
+    private const float SpecRowBandHeight = 104f;
+    private const float SpecRowBandOffsetX = 412f;   // 순위 숫자 자리 → 줄(가로선 37~951) 가운데
+    private const float SpecRowBadgeSize = 66f;
+    private const float SpecPlayerLabelSize = 42f;   // 기록 시각 글자는 32
+
+    private static void AddPlayerRowRanks(RankTableView view, float boardX)
+    {
+        Rect board = Psd("Spectator_Ranking");
+        var root = (RectTransform)view.transform;
+        Sprite rounded = AssetDatabase.GetBuiltinExtraResource<Sprite>("UI/Skin/UISprite.psd");
+        Sprite circle = AssetDatabase.GetBuiltinExtraResource<Sprite>("UI/Skin/Knob.psd");
+        var texts = new UnityEngine.Object[5];
+        var bands = new UnityEngine.Object[5];
+        var badges = new UnityEngine.Object[5];
+        var so = new SerializedObject(view);
+        SerializedProperty labels = so.FindProperty("timeTexts");
+        for (int k = 0; k < SpecPlayerRowY.Length; k++)
+        {
+            int row = texts.Length - SpecPlayerRowY.Length + k;
+            Color accent = k == 0 ? Player1Color : Player2Color;
+            float y = board.yMin + SpecPlayerRowY[k];
+
+            Image band = AddSprite(Place(CreateRect($"Row{row + 1}_Band", root), PsdPoint(new Vector2(board.xMin + boardX + SpecRowBandOffsetX, y), screen),
+                new Vector2(SpecRowBandWidth, SpecRowBandHeight)), rounded, new Color(accent.r, accent.g, accent.b, 0.22f));
+            band.type = Image.Type.Sliced;
+            band.pixelsPerUnitMultiplier = 0.35f;
+            band.transform.SetSiblingIndex(k);   // 표 글자들보다 뒤
+            band.enabled = false;
+            bands[row] = band;
+
+            Image badge = AddSprite(Place(CreateRect($"Row{row + 1}_Badge", root), PsdPoint(new Vector2(board.xMin + boardX, y), screen),
+                new Vector2(SpecRowBadgeSize, SpecRowBadgeSize)), circle, accent);
+            badge.enabled = false;
+            badges[row] = badge;
+
+            texts[row] = ValueText(root, $"Row{row + 1}_Rank", "12", new Vector2(board.xMin + boardX, y),
+                new Vector2(SpecRowBadgeSize - 8f, 50f), 36f, TextColor, Weight.Bold, HorizontalAlignmentOptions.Center);
+
+            // 이름 글자는 평소 기록 시각 모양 그대로 (예전 프리팹에서 굵게 바꿔 둔 것 되돌림). PLAYER 줄 모양은 RankTableView 가 바꾼다.
+            var label = labels.arraySize > row ? labels.GetArrayElementAtIndex(row).objectReferenceValue as TMP_Text : null;
+            var first = labels.arraySize > 0 ? labels.GetArrayElementAtIndex(0).objectReferenceValue as TMP_Text : null;
+            if (label != null && first != null)
+            {
+                label.font = first.font;
+                label.fontStyle = first.fontStyle;
+                label.fontSizeMax = first.fontSizeMax;
+                label.fontSize = first.fontSize;
+                label.color = first.color;
+                label.rectTransform.sizeDelta = new Vector2(label.rectTransform.sizeDelta.x, SpecPlayerLabelSize * 1.4f);
+                EditorUtility.SetDirty(label);
+            }
+        }
+        foreach (var o in bands) if (o is Graphic g) g.raycastTarget = false;
+        foreach (var o in badges) if (o is Graphic g) g.raycastTarget = false;
+        WireList(view, "rankTexts", texts);
+        WireList(view, "rowBands", bands);
+        WireList(view, "rankBadges", badges);
+        Wire(view, ("playerLabelFont", Font(Weight.ExtraBold)));
+        var viewSo = new SerializedObject(view);
+        viewSo.FindProperty("playerLabelSize").floatValue = SpecPlayerLabelSize;
+        viewSo.FindProperty("badgeTextColor").colorValue = WhiteColor;
+        viewSo.ApplyModifiedPropertiesWithoutUndo();
+    }
+
+    // 예전에 만든 85형 프리팹의 랭킹 표에 PLAYER 줄 순위 숫자·강조가 없으면 (예전 순위 숫자는 지우고) 다시 만든다
+    private static void EnsureSpectatorPlayerRows(bool rebuild = false)
+    {
+        string path = PanelPrefabPath(SpectatorName);
+        GameObject root = PrefabUtility.LoadPrefabContents(path);
+        Vector2 previousScreen = screen;
+        screen = SpectatorResolution;   // 85형 좌표 (따로 불려도 32형 기준으로 놓이지 않게)
+        try
+        {
+            bool changed = false;
+            foreach (var (table, x) in new[] { ("Bottom_1_Ranking/Table_Energy", SpecEnergyRankX), ("Bottom_1_Ranking/Table_Sale", SpecSaleRankX) })
+            {
+                var view = root.transform.Find(table)?.GetComponent<RankTableView>();
+                var viewSo = view != null ? new SerializedObject(view) : null;
+                if (view == null || (!rebuild && viewSo.FindProperty("rowBands").arraySize > 0
+                    && viewSo.FindProperty("playerLabelFont").objectReferenceValue != null)) continue;
+                for (int c = view.transform.childCount - 1; c >= 0; c--)
+                {
+                    GameObject child = view.transform.GetChild(c).gameObject;
+                    if (child.name.EndsWith("_Rank") || child.name.EndsWith("_Band") || child.name.EndsWith("_Badge"))
+                        UnityEngine.Object.DestroyImmediate(child);
+                }
+                AddPlayerRowRanks(view, x);
+                changed = true;
+            }
+            if (changed)
+            {
+                PrefabUtility.SaveAsPrefabAsset(root, path);
+                Debug.Log($"85형 랭킹 표 PLAYER 줄 순위 숫자·강조 추가: {path}");
+            }
+        }
+        finally
+        {
+            screen = previousScreen;
+            PrefabUtility.UnloadPrefabContents(root);
+        }
+    }
+
     // 85형 가운데 아래 안내 카드 + 가운데 카운트다운 (SpectatorNotice). 패널 맨 위(마지막 자식)에 둔다.
-    // 디자이너 시안에 없는 화면이라 32형 체험 안내 카드·STEP 배지 모양의 임시 그림(Tools/make_spectator_notice_parts.py)으로 만든다.
+    // 디자이너 시안에 없는 화면이라 (지금은 없앤) 32형 체험 안내 카드·STEP 배지 모양의 임시 그림(Tools/make_spectator_notice_parts.py)으로 만든다.
     // 카드는 아래 칸(PSD y 3068~) 위, 3D 바퀴 아래의 트랙 자리(PSD y 약 2340~3020)에 둬서 바퀴를 가리지 않는다.
     private static SpectatorNotice CreateSpectatorNotice(RectTransform panel)
     {
@@ -664,9 +1179,13 @@ public static class PowerPrefabBuilder
         Wire(screenView,
             ("canvas", canvas),
             ("recordTag", Find<RectTransform>("RecordTag")),
+            ("recordTagView", Find<RecordTagView>("RecordTag")),
             ("energyTable", Find<RankTableView>("Bottom_1_Ranking/Table_Energy")),
             ("saleTable", Find<RankTableView>("Bottom_1_Ranking/Table_Sale")),
             ("notice", Find<SpectatorNotice>("Notice")));
+        WireAheadMarkers(t, screenView);
+        WireBehindMarkers(t, screenView);
+        Wire(screenView, ("titleGroup", Find<CanvasGroup>("Group_Title")));
         WireList(screenView, "statusTexts", new UnityEngine.Object[] { Find<TMP_Text>("Status_1"), Find<TMP_Text>("Status_2") });
         WireList(screenView, "energyTexts", new UnityEngine.Object[] { Find<TMP_Text>("Energy_1"), Find<TMP_Text>("Energy_2") });
         WireList(screenView, "bottomGroups", new UnityEngine.Object[]
@@ -715,12 +1234,11 @@ public static class PowerPrefabBuilder
             ("canvas", canvas),
             ("idlePanel", instances[0].GetComponent<IdlePanel>()),
             ("joinPanel", instances[1].GetComponent<JoinPanel>()),
-            ("guidePanel", instances[2].GetComponent<GuidePanel>()),
-            ("countdownPanel", instances[3].GetComponent<CountdownPanel>()),
-            ("runPanel", instances[4].GetComponent<RunPanel>()),
-            ("voltagePanel", instances[5].GetComponent<VoltagePanel>()),
-            ("salePanel", instances[6].GetComponent<SalePanel>()),
-            ("rankingPanel", instances[7].GetComponent<RankingPanel>()));
+            ("countdownPanel", instances[2].GetComponent<CountdownPanel>()),
+            ("runPanel", instances[3].GetComponent<RunPanel>()),
+            ("voltagePanel", instances[4].GetComponent<VoltagePanel>()),
+            ("salePanel", instances[5].GetComponent<SalePanel>()),
+            ("rankingPanel", instances[6].GetComponent<RankingPanel>()));
         return go;
     }
 

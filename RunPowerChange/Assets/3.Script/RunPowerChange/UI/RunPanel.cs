@@ -6,6 +6,10 @@ using UnityEngine.UI;
 // 캐릭터 위 표시: ME 는 끝까지 내 캐릭터 머리 위를 따라다니고(어느 쪽이 나인지 알 수 있게),
 // 상대의 PLAYER 표시는 시안대로 시작 후 tagSeconds 동안만 보인다.
 // 위쪽 가운데에 상대방(혼자면 오늘 1위 기록)보다 몇 m 앞서는지/뒤처지는지 보여 준다.
+// 그 아래에 "지금 기록이면 오늘 N명 중 M등"(발전왕 종합순위 기준, WheelSession.LiveEnergyRank)을 보여 준다.
+// 순위는 오늘 저장된 랭킹 기록과 같이 달리는 상대만 센다. 1위 기록 선은 오늘 기록이 없으면 전날 1위라 "전날 최고 랭킹"으로 바꿔 보여 준다.
+// 85형처럼 1위 기록 선(RaceStage, 32형 화면별 한 벌) 위에 "오늘 최고 랭킹" 표시를 붙인다. 선은 실제 거리 차 자리에 있다.
+// 손잡이를 놓으면(FREE, 다음 HOLD 까지) 손잡이 경고(빨간 테두리 점멸)를 띄운다. 그동안 발전량은 늘지 않는다 (WheelSession.Watt).
 public class RunPanel : WheelPanel
 {
     [Header("속도계")]
@@ -44,11 +48,30 @@ public class RunPanel : WheelPanel
     [SerializeField] private Color behindColor = new Color32(250, 114, 85, 255);
     [SerializeField] private Color evenColor = new Color32(251, 176, 59, 255);
 
+    [Header("지금 순위")]
+    [Tooltip("비워두면 표시하지 않음")]
+    [SerializeField] private GameObject rankGroup;
+    [SerializeField] private TMP_Text rankText;
+    [Tooltip("순위 숫자 색 (프리팹 생성 도구가 PowerUIKit 색으로 채운다)")]
+    [SerializeField] private Color rankColor = new Color32(251, 176, 59, 255);
+
+    [Header("1위 기록 선 표시")]
+    [Tooltip("\"오늘 최고 랭킹\" 표시 (아래 끝 가운데 피벗). 비워두면 표시하지 않음")]
+    [SerializeField] private RectTransform recordTag;
+    [Tooltip("오늘/전날 그림 바꾸기. 비워두면 바꾸지 않음")]
+    [SerializeField] private RecordTagView recordTagView;
+
+    [Header("손잡이 경고")]
+    [Tooltip("비워두면 표시하지 않음")]
+    [SerializeField] private HandWarningView handWarning;
+
     private float needleAngle;
 
     protected override void Refresh()
     {
         needleAngle = 0f;
+        if (handWarning != null) handWarning.ResetEffect();
+        if (recordTag != null) recordTag.gameObject.SetActive(false);
         Update();
     }
 
@@ -74,6 +97,9 @@ public class RunPanel : WheelPanel
 
         UpdateTags();
         UpdateCompare();
+        UpdateRank();
+        UpdateRecordTag();
+        if (handWarning != null) handWarning.Set(Session.HandsReleased);
     }
 
     // 자기 레인에는 ME(계속), 상대 레인에는 PLAYER 0n(처음 tagSeconds 동안). 혼자 달리면 상대 레인(1위 고스트)에는 표시하지 않는다.
@@ -148,6 +174,38 @@ public class RunPanel : WheelPanel
         return diff > 0f
             ? $"{who}보다 {Paint($"{diff:0}m", aheadColor)} 앞서는 중!"
             : $"{whoObject} {Paint($"{-diff:0}m", behindColor)} 차이로 추격 중!";
+    }
+
+    private void UpdateRank()
+    {
+        if (rankGroup == null) return;
+        bool show = Session.Round != null && Session.StateElapsed >= compareDelaySeconds;
+        if (rankGroup.activeSelf != show) rankGroup.SetActive(show);
+        if (!show) return;
+
+        int total = Session.LiveTotal;
+        SetText(rankText, total <= 1
+            ? $"오늘의 {Paint("첫 기록", rankColor)}에 도전 중!"
+            : $"지금 기록이면 오늘 {total}명 중 {Paint($"{Session.LiveEnergyRank}등", rankColor)}이에요!");
+    }
+
+    // 1위 기록 선 가운데 위에 표시의 아래 끝을 둔다. 선이 화면 밖(카메라 뒤 등)이면 숨긴다.
+    private void UpdateRecordTag()
+    {
+        if (recordTag == null) return;
+        var stage = RaceStage.Instance;
+        bool show = stage != null && RaceCamera != null && stage.ScreenRecordVisible(Session.WheelId);
+        Vector2 local = default;
+        if (show)
+        {
+            var parent = (RectTransform)recordTag.parent;
+            Vector3 screen = RaceCamera.WorldToScreenPoint(stage.ScreenRecordPoint(Session.WheelId));
+            show = screen.z > 0f && RaceCamera.pixelRect.Contains(screen)
+                && RectTransformUtility.ScreenPointToLocalPointInRectangle(parent, screen, null, out local);
+            if (show) recordTag.anchoredPosition = local + (Vector2.one * 0.5f - parent.pivot) * parent.rect.size;
+        }
+        if (show && recordTagView != null) recordTagView.Set(Session.Round != null && Session.Round.LeaderFromPreviousDay);
+        if (recordTag.gameObject.activeSelf != show) recordTag.gameObject.SetActive(show);
     }
 
     private static string Paint(string text, Color color) => $"<color=#{ColorUtility.ToHtmlStringRGB(color)}>{text}</color>";

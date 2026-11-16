@@ -3,7 +3,7 @@ using UnityEngine;
 // 달려라! 전력 챌린지의 게임 진행 → 소리 연결. 소리 이름(키)은 StreamingAssets/Audio/sound.json 과 같아야 한다.
 //
 // BGM (회차 단계 기준. PC 1대 스피커라 두 쳇바퀴가 같이 듣는다)
-//  idle   : 대기·참가 대기·준비·체험 안내
+//  idle   : 대기·참가 대기·준비
 //  race   : 카운트다운·달리기
 //  result : 달리기가 끝난 뒤 (전압 선택·판매·랭킹)
 // 효과음

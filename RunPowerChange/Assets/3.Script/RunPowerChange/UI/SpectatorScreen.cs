@@ -7,16 +7,23 @@ using UnityEngine.UI;
 
 // 85형 관전 화면 (세로 2160x3840). Canvas_Spectator 프리팹 루트에 붙는다.
 //  - 위: PLAYER 01/02 상태(모집 중 / 참가 완료 / 체험중 / 승리! …)와 누적 환산 발전량. 뒤의 3D 장면은 RaceCamera(Spectator)가 그린다.
-//  - 가운데: "오늘 최고 랭킹" 표시가 3D 최고 랭킹 선(RaceStage.RecordLine)을 따라다닌다.
+//  - 가운데: "오늘 최고 랭킹" 표시가 3D 최고 랭킹 선(RaceStage.RecordLine)의 가운데(화면 중앙, 두 레인 사이) 위에 붙어 따라다닌다.
+//    선이 화면 위쪽까지 가도 숨기지 않고 화면 밖으로 나갈 때까지 따라간다. 화면 위 PLAYER 01/02 글자는 양옆에 있고
+//    가운데 제목은 달리는 동안 숨기므로 가리는 것이 없다.
+//  - 제목(달려라! 전력 챌린지)은 카운트다운부터 달리기가 끝날 때까지 숨겨 앞으로 나간 바퀴가 가리지 않게 한다.
+//  - 바퀴·선은 실제 거리 차만큼 앞으로 가서 많이 앞서면 화면 위로 나간다. 화면 밖으로 완전히 나가면
+//    다른 게임처럼 화면 맨 위 그 x 자리에 화살표와 "PLAYER 01 63m 앞서는 중"(1위 기록 선은 한 줄 아래 "오늘 최고 랭킹 63m 앞")을 띄운다.
 //  - 아래 칸: 오늘의 발전왕·판매왕 순위 → 왜 그럴까요? → 우리와 어떤 관련이 있을까요? 가 spectatorInfoSeconds 마다 바뀐다.
 //    설명 그림은 현장에서 바꿀 수 있게 StreamingAssets/Spectator/info_1.png, info_2.png 를 읽는다 (없으면 기본 그림, 로그만 남김).
 //  - 가운데 아래 안내 카드(SpectatorNotice): 관람객이 지금 상황을 알 수 있게 회차 단계를 알려 준다.
-//      참가자 모집(Open) → 경기 준비(Ready) → 체험 방법 안내(Guide) → 카운트다운 3·2·1·GO(가운데 큰 숫자) → 달리기(카드 없음)
+//      참가자 모집(Open) → 경기 준비(Ready) → 카운트다운 3·2·1·GO(가운데 큰 숫자) → 달리기(카드 없음)
 //      → 경기 결과: 승자 발표(1인 체험은 1위 기록 도전 결과, spectatorWinnerSeconds) → 결과 집계 중(선수들이 전압 선택·판매 중)
 //      → 참가자가 모두 랭킹 화면에 가면 종합 순위 발표(아래 칸을 랭킹으로 고정, 회차가 먼저 끝나도 spectatorRankingSeconds 동안)
 //    2인 경주 승자는 누적 환산 발전량(화면 위 wh 숫자)이 큰 쪽이다. 보이는 숫자가 같으면 무승부.
 //    1인 체험은 같이 달린 1위 기록(고스트)과 같은 기준(달린 거리)으로 돌파했는지 본다.
-// 랭킹은 두 쳇바퀴의 기록을 합쳐(종합순위) 보여 준다. 캔버스 출력 디스플레이는 Setting.json spectatorDisplayIndex 를 따른다.
+// 랭킹은 두 쳇바퀴의 기록을 합쳐(종합순위) 보여 준다. 평소에는 1~5위 기록. 회차가 끝나 종합 순위를 발표하는 동안만
+// 아래 줄(2인이면 4·5위 자리, 1인이면 5위 자리)을 이번 참가자의 PLAYER 줄(방금 기록과 종합 순위, 레인 색 강조)로 바꾼다.
+// 캔버스 출력 디스플레이는 Setting.json spectatorDisplayIndex 를 따른다.
 public class SpectatorScreen : MonoBehaviour
 {
     // 승자 발표 시작 (소리 연결용)
@@ -35,8 +42,24 @@ public class SpectatorScreen : MonoBehaviour
     [Tooltip("3D 선 위치를 화면 좌표로 바꿀 85형 카메라")]
     [SerializeField] private Camera raceCamera;
     [SerializeField] private RectTransform recordTag;
+    [Tooltip("오늘/전날 그림 바꾸기 (선이 전날 1위면 \"전날 최고 랭킹\"). 비워두면 바꾸지 않음")]
+    [SerializeField] private RecordTagView recordTagView;
     [Tooltip("표시 그림에서 선과 닿는 점(아래 끝)의 피벗 기준 높이 비율. 0 = 그림 아래 끝")]
     [SerializeField] private float recordTagAnchorY = 0f;
+
+    [Header("제목 (달리는 동안 숨김)")]
+    [Tooltip("비워두면 숨기지 않음")]
+    [SerializeField] private CanvasGroup titleGroup;
+
+    [Header("화면 밖으로 나간 레인 표시 (인덱스 0 = 쳇바퀴 1, 1 = 쳇바퀴 2, 2 = 1위 기록 선)")]
+    [Tooltip("화살표 + 상자 묶음. x 만 대상 자리를 따라간다. 비워두면 표시하지 않음")]
+    [SerializeField] private RectTransform[] aheadMarkers;
+    [SerializeField] private TMP_Text[] aheadTexts;
+    [Tooltip("거리 숫자 색 (프리팹 생성 도구가 PowerUIKit 색으로 채운다)")]
+    [SerializeField] private Color aheadColor = new Color32(251, 176, 59, 255);
+    [Tooltip("화면 아래로 빠진 레인 표시 (인덱스 0 = 쳇바퀴 1, 1 = 쳇바퀴 2). 앞선 사람을 따라갈 때 뒤처진 바퀴용. 비워두면 표시하지 않음")]
+    [SerializeField] private RectTransform[] behindMarkers;
+    [SerializeField] private TMP_Text[] behindTexts;
 
     [Header("아래 칸 (나오는 순서)")]
     [SerializeField] private CanvasGroup[] bottomGroups;
@@ -48,6 +71,8 @@ public class SpectatorScreen : MonoBehaviour
     [Header("랭킹 (아래 칸 첫 번째)")]
     [SerializeField] private RankTableView energyTable;
     [SerializeField] private RankTableView saleTable;
+    [Tooltip("PLAYER 01/02 레인 색 (랭킹 표 PLAYER 줄 강조). 3D 레인·화면 밖 화살표와 같은 색")]
+    [SerializeField] private Color[] playerColors = { new Color32(47, 128, 237, 255), new Color32(236, 56, 140, 255) };
 
     [Header("가운데 아래 안내 카드·카운트다운")]
     [Tooltip("비워두면 표시하지 않음")]
@@ -147,6 +172,9 @@ public class SpectatorScreen : MonoBehaviour
         UpdateRound();
         UpdatePlayers();
         UpdateRecordTag();
+        UpdateAheadMarkers();
+        UpdateBehindMarkers();
+        UpdateTitle();
         UpdateBottom();
         UpdateNotice();
 
@@ -231,8 +259,10 @@ public class SpectatorScreen : MonoBehaviour
 
     private void ClearResult()
     {
+        bool wasRevealing = Revealing;
         results.Clear();
         revealTime = -1f;
+        if (wasRevealing) RefreshRanking();   // PLAYER 줄을 걷고 1~5위로
         resultLeader = null;
     }
 
@@ -318,13 +348,13 @@ public class SpectatorScreen : MonoBehaviour
 
     private static string StatusOf(GameRound round, WheelSession s, bool playing)
     {
+        if (!s.Enabled) return "점검 중";
         if (round == null) return playing ? "체험중" : "체험 대기중";
         bool joined = round.IsParticipant(s);
         switch (round.Current)
         {
             case GameRound.Phase.Open: return joined ? "참가 완료" : "모집 중";
-            case GameRound.Phase.Ready:
-            case GameRound.Phase.Guide: return joined ? "준비 중" : "체험 대기중";
+            case GameRound.Phase.Ready: return joined ? "준비 중" : "체험 대기중";
             default: return playing ? "체험중" : "체험 대기중";
         }
     }
@@ -356,12 +386,6 @@ public class SpectatorScreen : MonoBehaviour
 
             case GameRound.Phase.Ready:
                 ShowReady(round);
-                return;
-
-            case GameRound.Phase.Guide:
-                notice.ShowCard("체험 방법 안내", "선수들이 체험 방법을 확인하고 있어요",
-                    "달려서 전기를 만들고, 송전 방식을 골라 판매해요\n잠시 후 경기가 시작됩니다",
-                    Seconds(Config.guideSeconds - round.PhaseElapsed));
                 return;
 
             case GameRound.Phase.Countdown:
@@ -458,18 +482,139 @@ public class SpectatorScreen : MonoBehaviour
         bool show = stage != null && stage.RecordLineVisible && raceCamera != null;
         if (recordTag.gameObject.activeSelf != show) recordTag.gameObject.SetActive(show);
         if (!show) return;
+        if (recordTagView != null) recordTagView.Set(GameRound.Instance != null && GameRound.Instance.LeaderFromPreviousDay);
 
-        // 선의 오른쪽 끝 위에 표시의 아래 끝이 오도록 화면 좌표 → 캔버스 좌표로 옮긴다
-        Vector3 screen = raceCamera.WorldToScreenPoint(stage.RecordLineTagPoint);
+        // 선 위, 두 레인 정중앙에 표시의 아래 끝이 오도록 화면 좌표 → 캔버스 좌표로 옮긴다
+        Vector3 screen = raceCamera.WorldToScreenPoint(stage.RecordLineLaneCenter);
         var parent = (RectTransform)recordTag.parent;
         Camera uiCamera = canvas != null && canvas.renderMode != RenderMode.ScreenSpaceOverlay ? canvas.worldCamera : null;
         if (!RectTransformUtility.ScreenPointToLocalPointInRectangle(parent, screen, uiCamera, out Vector2 local)) return;
         float offsetY = (recordTag.pivot.y - recordTagAnchorY) * recordTag.rect.height;
-        recordTag.anchoredPosition = new Vector2(recordTag.anchoredPosition.x, local.y + offsetY - LocalCenterOffset(parent));
+        Vector2 center = (new Vector2(0.5f, 0.5f) - parent.pivot) * parent.rect.size;   // 표시 앵커(부모 가운데) 기준으로 맞춤
+        recordTag.anchoredPosition = new Vector2(local.x - center.x, local.y + offsetY - center.y);
     }
 
-    // 표시의 앵커가 부모 가운데라 local 좌표(부모 피벗 기준)와 anchoredPosition 의 차이를 맞춘다
-    private static float LocalCenterOffset(RectTransform parent) => (0.5f - parent.pivot.y) * parent.rect.height;
+    // ── 화면 위로 나간 레인 표시 ─────────────────────────
+
+    private string Paint(string text) => $"<color=#{ColorUtility.ToHtmlStringRGB(aheadColor)}>{text}</color>";
+
+    // 카운트다운부터 달리기가 끝날 때까지 제목을 숨긴다
+    private void UpdateTitle()
+    {
+        if (titleGroup == null) return;
+        var round = GameRound.Instance;
+        bool racing = round != null && (round.Current == GameRound.Phase.Countdown || round.Current == GameRound.Phase.Run);
+        float step = Time.unscaledDeltaTime / Mathf.Max(0.01f, fadeSeconds);
+        titleGroup.alpha = Mathf.MoveTowards(titleGroup.alpha, racing ? 0f : 1f, step);
+    }
+
+    private void UpdateAheadMarkers()
+    {
+        if (aheadMarkers == null) return;
+        var stage = RaceStage.Instance;
+        var round = GameRound.Instance;
+        bool racing = stage != null && raceCamera != null && round != null && round.Current == GameRound.Phase.Run;
+
+        for (int i = 0; i < aheadMarkers.Length; i++)
+        {
+            RectTransform marker = aheadMarkers[i];
+            if (marker == null) continue;
+            var panel = (RectTransform)marker.parent;
+            string text = null;
+            Vector3 world = default;
+
+            if (racing && i < 2)
+            {
+                // 앞선 바퀴가 화면 위로 완전히 나갔을 때 (바퀴 아래 끝이 화면 위 끝보다 위)
+                RaceRunner runner = stage.Runner(i + 1);
+                float ahead = runner != null && runner.IsActive ? runner.DistanceM - stage.TrailingDistance : 0f;
+                if (ahead >= 1f && OffTop(runner.WheelBottomPoint, panel))
+                {
+                    world = runner.WheelCenterPoint;
+                    string who = runner.CurrentMode == RaceRunner.Mode.Leader
+                        ? (round.LeaderFromPreviousDay ? "전날 1위" : "오늘 1위")
+                        : $"PLAYER {runner.WheelId:00}";
+                    text = $"{who} {Paint($"{ahead:0}m")} 앞서는 중";
+                }
+            }
+            else if (racing && round.Ghost == null && stage.RecordLineVisible && stage.RecordAheadM >= 1f && OffTop(stage.RecordLineCenter, panel))
+            {
+                // 1위 기록 선 (2인 경주만. 혼자 달리면 1위 기록은 고스트 레인이라 위 레인 표시로 나온다)
+                world = stage.RecordLineCenter;
+                text = $"{(round.LeaderFromPreviousDay ? "전날" : "오늘")} 최고 랭킹 {Paint($"{stage.RecordAheadM:0}m")} 앞";
+            }
+
+            bool show = false;
+            if (text != null && ToPanel(raceCamera.WorldToScreenPoint(world), panel, out Vector2 p))
+            {
+                // x 만 대상 자리를 따라가고(화면 안으로 제한) 높이는 화면 맨 위에 고정
+                show = true;
+                float half = panel.rect.width * 0.5f - marker.rect.width * 0.5f - 20f;
+                marker.anchoredPosition = new Vector2(Mathf.Clamp(p.x, -half, half), marker.anchoredPosition.y);
+                if (aheadTexts != null && i < aheadTexts.Length && aheadTexts[i] != null && aheadTexts[i].text != text) aheadTexts[i].text = text;
+            }
+            if (marker.gameObject.activeSelf != show) marker.gameObject.SetActive(show);
+        }
+    }
+
+    // 85형이 앞선 사람을 따라가 뒤처진 바퀴가 화면 아래(아래 칸 뒤)로 빠지면 아래 칸 바로 위에 "PLAYER 02 60m 추격 중" 표시.
+    // 바퀴 윗면이 표시 아래 끝보다 아래로 내려가거나 카메라 뒤로 지나가면 띄운다. x 는 그 레인 자리.
+    private void UpdateBehindMarkers()
+    {
+        if (behindMarkers == null) return;
+        var stage = RaceStage.Instance;
+        var round = GameRound.Instance;
+        bool racing = stage != null && raceCamera != null && round != null && round.Current == GameRound.Phase.Run && stage.SpectatorFollowingLeader;
+
+        for (int i = 0; i < behindMarkers.Length; i++)
+        {
+            RectTransform marker = behindMarkers[i];
+            if (marker == null) continue;
+            var panel = (RectTransform)marker.parent;
+            string text = null;
+            float x = marker.anchoredPosition.x;
+
+            RaceRunner runner = racing ? stage.Runner(i + 1) : null;
+            if (runner != null && runner.CurrentMode == RaceRunner.Mode.Player && round.IsParticipant(runner.Session))
+            {
+                float behind = stage.LeadingDistance - runner.DistanceM;
+                float bottomEdge = marker.anchoredPosition.y - marker.rect.height * 0.5f;
+                bool below = !ToPanel(raceCamera.WorldToScreenPoint(runner.WheelTopPoint), panel, out Vector2 top) || top.y < bottomEdge;
+                if (behind >= 1f && below)
+                {
+                    text = $"PLAYER {runner.WheelId:00} {Paint($"{behind:0}m")} 추격 중";
+                    // 레인 가로 자리: 카메라 앞 일정 거리의 같은 레인 점
+                    Vector3 lane = runner.WheelCenterPoint;
+                    lane.z = raceCamera.transform.position.z + 15f;
+                    if (ToPanel(raceCamera.WorldToScreenPoint(lane), panel, out Vector2 p)) x = p.x;
+                }
+            }
+
+            bool show = text != null;
+            if (show)
+            {
+                float half = panel.rect.width * 0.5f - marker.rect.width * 0.5f - 20f;
+                marker.anchoredPosition = new Vector2(Mathf.Clamp(x, -half, half), marker.anchoredPosition.y);
+                if (behindTexts != null && i < behindTexts.Length && behindTexts[i] != null && behindTexts[i].text != text) behindTexts[i].text = text;
+            }
+            if (marker.gameObject.activeSelf != show) marker.gameObject.SetActive(show);
+        }
+    }
+
+    // 월드 점이 화면(패널) 위 끝보다 위에 있는지 (카메라 뒤면 false)
+    private bool OffTop(Vector3 world, RectTransform panel) =>
+        ToPanel(raceCamera.WorldToScreenPoint(world), panel, out Vector2 p) && p.y > panel.rect.height * 0.5f;
+
+    // 화면 좌표 → 패널 가운데 기준 좌표
+    private bool ToPanel(Vector3 screen, RectTransform panel, out Vector2 point)
+    {
+        point = default;
+        if (screen.z <= 0f) return false;
+        Camera uiCamera = canvas != null && canvas.renderMode != RenderMode.ScreenSpaceOverlay ? canvas.worldCamera : null;
+        if (!RectTransformUtility.ScreenPointToLocalPointInRectangle(panel, screen, uiCamera, out Vector2 local)) return false;
+        point = local - (Vector2.one * 0.5f - panel.pivot) * panel.rect.size;
+        return true;
+    }
 
     // ── 아래 칸 ─────────────────────────────────────────
 
@@ -477,7 +622,7 @@ public class SpectatorScreen : MonoBehaviour
     {
         if (bottomGroups == null || bottomGroups.Length == 0) return;
         float interval = Mathf.Max(1f, Config.spectatorInfoSeconds);
-        if (revealTime >= 0f && results.Count > 0)
+        if (Revealing)
         {
             // 종합 순위 발표 중에는 랭킹 칸에 고정한다
             bottomTime = Time.unscaledTime;
@@ -516,7 +661,41 @@ public class SpectatorScreen : MonoBehaviour
     private void Fill(RankTableView table, WheelRankingStore.Kind kind)
     {
         if (table == null) return;
-        table.Set(kind, WheelRankingStore.TotalTop(kind, table.RowCount), null, 0);
+
+        // 종합 순위 발표 중이면 이번 회차에서 기록을 남긴 참가자의 방금 기록과 종합 순위. 순위가 높은 사람을 위 줄에 둔다
+        // (같으면 PLAYER 번호 순). 발전왕·판매왕 표마다 따로 정렬하므로 두 표의 줄 순서가 다를 수 있다.
+        var rows = new List<(WheelSession s, PowerRecord latest, int rank)>();
+        if (Revealing)
+        {
+            foreach (var r in results)
+            {
+                WheelSession s = Session(r.wheelId);
+                if (s == null || !r.reachedRanking) continue;
+                PowerRecord latest = s.Ranking != null ? s.Ranking.Latest : null;
+                int rank = latest != null ? WheelRankingStore.TotalRank(kind, kind == WheelRankingStore.Kind.Energy ? latest.energyWh : latest.saleWon) : 0;
+                rows.Add((s, latest, rank));
+            }
+            rows.Sort((a, b) =>
+            {
+                int ra = a.rank > 0 ? a.rank : int.MaxValue, rb = b.rank > 0 ? b.rank : int.MaxValue;
+                return ra != rb ? ra.CompareTo(rb) : a.s.WheelId.CompareTo(b.s.WheelId);
+            });
+        }
+
+        // PLAYER 줄은 맨 아래 줄부터 채운다. 혼자 체험했으면 1~4위 기록 + 5번째 줄 PLAYER, 둘이면 1~3위 + PLAYER 두 줄.
+        int top = Mathf.Max(0, table.RowCount - rows.Count);
+        table.Set(kind, WheelRankingStore.TotalTop(kind, top), null, 0);
+        for (int i = 0; i < rows.Count && top + i < table.RowCount; i++)
+            table.SetRow(top + i, kind, $"PLAYER {rows[i].s.WheelId:00}", rows[i].latest, rows[i].rank, PlayerColor(rows[i].s.WheelId));
+    }
+
+    // 종합 순위 발표 중 (랭킹 칸 고정, PLAYER 줄 표시)
+    private bool Revealing => revealTime >= 0f && results.Count > 0;
+
+    private Color PlayerColor(int wheelId)
+    {
+        int i = wheelId - 1;
+        return playerColors != null && i >= 0 && i < playerColors.Length ? playerColors[i] : Color.white;
     }
 
     // 새 기록이 들어오면 바로 랭킹 칸을 보여 준다

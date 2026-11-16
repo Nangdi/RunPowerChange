@@ -2,9 +2,10 @@ using System;
 using System.Collections.Generic;
 using UnityEngine;
 
-// 두 쳇바퀴가 같이 쓰는 게임 회차. 같은 회차의 체험자는 같이 안내를 보고, 같이 카운트다운하고, 같이 달린다.
+// 두 쳇바퀴가 같이 쓰는 게임 회차. 같은 회차의 체험자는 같이 카운트다운하고, 같이 달린다.
 //
-// Idle ─(한 명 시작)→ Open ─(합류 시간 끝 또는 전원 참가)→ Ready(readySeconds 가 0 이면 건너뜀) → Guide → Countdown → Run → Post ─(참가자 모두 대기화면 복귀)→ Idle
+// Idle ─(한 명 시작)→ Open ─(합류 시간 끝 또는 전원 참가)→ Ready(readySeconds 가 0 이면 건너뜀) → Countdown → Run → Post ─(참가자 모두 대기화면 복귀)→ Idle
+// (체험 안내 화면은 없앴다. 손잡이 안내 문구는 카운트다운 화면 그림에 들어 있다)
 //
 // - Open 동안(joinWaitSeconds) 다른 쳇바퀴 화면에는 "참여하기" 버튼이 나오고, 누르면 같은 회차로 합류한다 (2인 경주).
 // - 그 뒤(회차 진행 중)에는 다른 쳇바퀴 대기화면의 체험시작이 막히고 "체험 중" 안내가 나온다. 회차가 끝나면 다시 시작할 수 있다.
@@ -12,7 +13,7 @@ using UnityEngine;
 // - 달리기가 끝난 뒤의 전압 선택·판매·랭킹은 각자 WheelSession 이 진행한다.
 public class GameRound : MonoBehaviour
 {
-    public enum Phase { Idle, Open, Ready, Guide, Countdown, Run, Post }
+    public enum Phase { Idle, Open, Ready, Countdown, Run, Post }
 
     public static GameRound Instance { get; private set; }
 
@@ -27,9 +28,8 @@ public class GameRound : MonoBehaviour
 
     // 합류 가능 남은 시간 (Open 일 때만 의미 있음)
     public float JoinRemaining => Current == Phase.Open ? Mathf.Max(0f, Config.joinWaitSeconds - PhaseElapsed) : 0f;
-    public bool CanJoin => Current == Phase.Idle || (Current == Phase.Open && JoinRemaining > 0f && participants.Count < AllSessions.Count);
+    public bool CanJoin => Current == Phase.Idle || (Current == Phase.Open && JoinRemaining > 0f && participants.Count < EnabledCount);
     public float ReadyRemaining => Current == Phase.Ready ? Mathf.Max(0f, Config.readySeconds - PhaseElapsed) : 0f;
-    public float GuideRemaining01 => Current == Phase.Guide && Config.guideSeconds > 0f ? Mathf.Clamp01(1f - PhaseElapsed / Config.guideSeconds) : 0f;
 
     public int CountdownNumber => Mathf.Max(0, Config.countdownSeconds - Mathf.FloorToInt(Current == Phase.Countdown ? PhaseElapsed : 0f));
     public float RunDuration => Mathf.Max(1f, Config.runSeconds);
@@ -51,9 +51,8 @@ public class GameRound : MonoBehaviour
             float run = RunDuration + post;
             switch (Current)
             {
-                case Phase.Open: return JoinRemaining + c.readySeconds + c.guideSeconds + c.countdownSeconds + run;
-                case Phase.Ready: return ReadyRemaining + c.guideSeconds + c.countdownSeconds + run;
-                case Phase.Guide: return Mathf.Max(0f, c.guideSeconds - PhaseElapsed) + c.countdownSeconds + run;
+                case Phase.Open: return JoinRemaining + c.readySeconds + c.countdownSeconds + run;
+                case Phase.Ready: return ReadyRemaining + c.countdownSeconds + run;
                 case Phase.Countdown: return Mathf.Max(0f, c.countdownSeconds - PhaseElapsed) + run;
                 case Phase.Run: return RunRemaining + post;
                 default: return post;
@@ -76,6 +75,18 @@ public class GameRound : MonoBehaviour
         {
             if (allSessions.Count == 0) allSessions.AddRange(FindObjectsOfType<WheelSession>());
             return allSessions;
+        }
+    }
+
+    // 사용 중인 쳇바퀴 수 (설정창에서 "사용 안 함"으로 둔 쳇바퀴는 뺀다). 모두 참가하면 합류 시간을 기다리지 않는다.
+    private int EnabledCount
+    {
+        get
+        {
+            int n = 0;
+            foreach (var s in AllSessions)
+                if (s != null && s.Enabled) n++;
+            return n;
         }
     }
 
@@ -140,15 +151,11 @@ public class GameRound : MonoBehaviour
         switch (Current)
         {
             case Phase.Open:
-                if (JoinRemaining <= 0f || participants.Count >= AllSessions.Count) BeginReady();
+                if (JoinRemaining <= 0f || participants.Count >= EnabledCount) BeginReady();
                 break;
 
             case Phase.Ready:
-                if (PhaseElapsed >= Config.readySeconds) BeginGuide();
-                break;
-
-            case Phase.Guide:
-                if (PhaseElapsed >= Config.guideSeconds) BeginCountdown();
+                if (PhaseElapsed >= Config.readySeconds) BeginCountdown();
                 break;
 
             case Phase.Countdown:
@@ -172,13 +179,7 @@ public class GameRound : MonoBehaviour
         LeaderFromPreviousDay = RaceRecordStore.LeadersFromPreviousDay;
         runElapsedAtEnd = 0f;
         GoTo(Phase.Ready);
-        if (Config.readySeconds <= 0f) BeginGuide();
-    }
-
-    private void BeginGuide()
-    {
-        GoTo(Phase.Guide);
-        foreach (var p in participants.ToArray()) p.BeginGuide();
+        if (Config.readySeconds <= 0f) BeginCountdown();
     }
 
     private void BeginCountdown()

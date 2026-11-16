@@ -25,10 +25,18 @@ public class WheelConfig
     public int wheelId = 1;
     // 회전 센서 컨트롤러 id (port.json 의 controllerId)
     public int controllerId = 1;
-    // 32형 터치모니터 디스플레이 번호 (0 = Display 1, -1 = 사용 안함)
+    // 32형 터치모니터 디스플레이 번호 (0 = Display 1, -1 = 사용 안함). 사용 안함(모니터 고장 등)이면
+    // 그 쳇바퀴 화면·카메라를 끄고 체험을 시작하거나 합류할 수 없게 한다. 혼자 달리는 회차의 1위 고스트 레인으로만 쓰인다.
     public int displayIndex;
+
+    public bool Enabled => displayIndex >= 0;
     // 장치 없이 시험할 때 누르고 있으면 달리는 키 (KeyCode 이름)
     public string simulateKey = "UpArrow";
+    // 장치 없이 시험: 누를 때마다 손잡이 잡음/놓음(HOLD/FREE 신호)을 바꾸는 키 (KeyCode 이름). 놓음이면 발전량이 늘지 않는다.
+    // 비어 있으면(이 항목이 없던 예전 Setting.json) 쳇바퀴 1 = DownArrow, 2 = S. "None" 이면 끔.
+    public string simulateGripKey = "";
+
+    public string GripKeyName => !string.IsNullOrEmpty(simulateGripKey) ? simulateGripKey : wheelId == 1 ? "DownArrow" : wheelId == 2 ? "S" : "None";
 }
 
 // 송전전압 1종의 계수. 실제 값이 아니라 체험용 가상 계수.
@@ -55,12 +63,10 @@ public class GameDynamicData
     public float runSeconds = 50f;
     // 시작 카운트다운(초)
     public int countdownSeconds = 3;
-    // 체험 안내 화면 자동 넘김(초)
-    public float guideSeconds = 10f;
     // 한 명이 시작한 뒤 다른 쳇바퀴가 같은 회차로 합류할 수 있는 시간(초). 참가 대기 화면에 남은 초가 나온다.
     public float joinWaitSeconds = 15f;
-    // 참가가 마감된 뒤 "준비하세요!" 화면(초). 끝나면 체험 안내로 넘어간다.
-    // 0 이면 이 화면 없이 바로 체험 안내로 넘어간다 (기본). 참가 대기 초를 센 뒤 또 초를 세면 어색해서 뺐다.
+    // 참가가 마감된 뒤 "준비하세요!" 화면(초). 끝나면 카운트다운으로 넘어간다.
+    // 0 이면 이 화면 없이 바로 카운트다운으로 넘어간다 (기본). 참가 대기 초를 센 뒤 또 초를 세면 어색해서 뺐다.
     public float readySeconds = 0f;
 
     // 쳇바퀴 1회전 이동거리(m) = 둘레. (직경 2m → 6.283)
@@ -125,8 +131,17 @@ public class GameDynamicData
     public float finishApproachSeconds = 10f;
     // 3D 배경(기둥·레일)이 달린 1m 마다 흘러가는 거리(유닛). 클수록 같은 속도에서 배경이 빨리 지나간다.
     public float raceScrollPerMeter = 1.5f;
-    // 두 체험자의 거리 차 1m 를 화면에서 앞뒤로 몇 유닛 벌릴지. 클수록 조금만 앞서도 크게 벌어진다.
-    public float raceGapPerMeter = 0.1f;
+    // (예전 raceGapPerMeter 는 없앴다: 32형·85형 모두 실제 거리 차 = raceScrollPerMeter 비율로 벌어진다)
+    // 32형·85형: 상대·1위 기록이 실제 거리 차만큼 앞에 보이는 최대 거리(m). 이보다 더 앞서면 이 거리에 머문다 (너무 멀어 점처럼 보이는 것 방지).
+    // 85형은 약 55m 부터 앞 바퀴가 화면 위로 완전히 나가며, 그때는 화면 맨 위 화살표와 "몇 m 앞서는 중" 표시가 대신 보여 준다.
+    public float raceScreenMaxAheadM = 100f;
+    // 85형 2인 경주: 거리 차가 이 값(m) 이상 벌어지면 화면을 앞선 사람 시점으로 바로 바꾼다 (앞 바퀴가 제자리, 뒤처진 바퀴는 아래로 빠짐).
+    // 뒤처진 사람이 따라잡아 나란히 서면 돌아온다 (그때는 두 시점이 같은 화면이라 바퀴가 튀지 않음). 85형은 원근이 커서 약 10m 앞이면 앞 바퀴가 화면 위쪽 발전량 글자 뒤로 작아지고 약 55m 면 화면 위로 나간다
+    // (그 사이는 화면 맨 위 "앞서는 중" 표시가 보여 줌). 기본 20m (현장 확인값). 0 이면 끔.
+    public float spectatorFollowGapM = 20f;
+    // 85형 2인 경주: 한 사람이 이 시간(초) 동안 멈춰 있으면 중도포기로 보고 계속 달리는 사람 시점으로 바꾼다
+    // (뒤처진 사람이 포기하면 앞선 사람, 앞선 사람이 포기하면 뒤처진 사람). 0 이면 끔.
+    public float spectatorQuitSeconds = 3f;
     // 캐릭터 달리기 동작 배속. 막 움직이기 시작할 때 characterAnimMinSpeed(걷듯이 느리게)에서
     // characterAnimMaxKmh 에서 characterAnimMaxSpeed 까지 속도에 비례해 빨라진다.
     // 초등 고학년~중학생이 2m 쳇바퀴에서 내는 속도(예상: 걷기 3~4, 조깅 6~8, 열심히 10~13, 순간 최고 15~18km/h)에 맞춘 값:
@@ -154,11 +169,20 @@ public class GameDynamicData
     // 쳇바퀴별 연결 (PC 1대에 쳇바퀴 2대)
     public List<WheelConfig> wheels = new List<WheelConfig>
     {
-        new WheelConfig { wheelId = 1, controllerId = 1, displayIndex = 0, simulateKey = "UpArrow" },
-        new WheelConfig { wheelId = 2, controllerId = 2, displayIndex = 1, simulateKey = "W" },
+        new WheelConfig { wheelId = 1, controllerId = 1, displayIndex = 0, simulateKey = "UpArrow", simulateGripKey = "DownArrow" },
+        new WheelConfig { wheelId = 2, controllerId = 2, displayIndex = 1, simulateKey = "W", simulateGripKey = "S" },
     };
     // 85형 관전 화면 디스플레이 번호 (-1 = 사용 안함)
     public int spectatorDisplayIndex = 2;
+
+    // wheelId 쳇바퀴 설정 (없으면 null)
+    public WheelConfig Wheel(int wheelId)
+    {
+        if (wheels == null) return null;
+        foreach (var w in wheels)
+            if (w != null && w.wheelId == wheelId) return w;
+        return null;
+    }
     // 설정창·RS232 디버그 패널·F1 도움말을 띄울 디스플레이 번호 (0 = Display 1). 관람객 32형 화면을 가리지 않게 85형 쪽(2 = Display 3).
     public int operatorDisplayIndex = 2;
 }

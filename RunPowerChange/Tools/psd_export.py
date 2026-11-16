@@ -3,7 +3,7 @@
 디자이너 PSD 2개에서 Unity용 이미지를 뽑는 도구.
 
   python Tools/psd_export.py "<32형 PSD 경로>" "<85형 PSD 경로>"
-    32형: 03-달려라 전력챌린지-프로그램용.psd (1920x1080 가로)
+    32형: 03-달려라 전력챌린지-프로그램용(수정-1110).psd (1920x1080 가로)
     85형: 03-달려라 전력챌린지(80인치화면)-프로그램용.psd (2160x3840 세로)
 
 출력 (모두 같은 경로, 같은 파일명으로 덮어쓴다 → Unity 연결(GUID) 유지)
@@ -36,9 +36,9 @@ G2 = "02-참가대기"
 G2A = f"{G2}/01-먼저 참가한 체험자 화면"
 G2B = f"{G2}/02-참가 대기화면"
 G2C = f"{G2}/03-모두 준비완료"
-G3 = "03-체험안내"
 G4 = "04-카운트"
 G5 = "05-게임화면"
+G5W = f"{G5}/경고문구(추가)"
 G6 = "06-고,저전압 선택화면"
 G7 = "07-전력판매 화면"
 G7C = f"{G7}/중앙-순서대로 나오게"
@@ -47,8 +47,7 @@ G8 = "08-랭킹화면"
 STATICS = {
     "Idle": [f"{G1}/그림자 레이어", f"{G1}/타이틀", f"{G1}/달려서 전기를 만들고 송전하여 더 많은 전기를 판매해보세요!"],
     "Join": [f"{G2}/그림자 레이어", f"{G2}/1~2p 배경", f"{G2}/타이틀"],
-    "Guide": [f"{G3}/그림자 레이어", f"{G3}/체험 안내", f"{G3}/자막", f"{G3}/스텝1", f"{G3}/스텝2", f"{G3}/스텝3",
-              f"{G3}/타임바(5~10초)/게이지 배경"],
+    # 자막 = "※ 양쪽 손잡이를 모두 잡아야 전력이 생산됩니다!" + 손잡이 그림 (1110 수정본에서 체험안내 화면을 없애고 여기로 옮김)
     "Countdown": [f"{G4}/그림자 레이어", f"{G4}/타이틀", f"{G4}/자막"],
     "Run": [f"{G5}/자막", f"{G5}/타임/타임/<Group>", f"{G5}/속도계/배경1", f"{G5}/속도계/배경2",
             f"{G5}/하단게이지/배경", f"{G5}/하단게이지/데코"],
@@ -74,7 +73,8 @@ PARTS = {
     "Badge_Ready_2": [f"{G2}/2P (래디-웨이트)/레디"],
     "Badge_Wait_2": [f"{G2}/2P (래디-웨이트)/웨이트"],
 
-    "Auto_Gauge": [f"{G3}/타임바(5~10초)/게이지"],
+    # 화면 하단 남은 시간 바. 1110 수정본에서 03-체험안내가 빠져 같은 그림인 06 화면 게이지에서 뽑는다.
+    "Auto_Gauge": [f"{G6}/타임게이지(5~10초)/게이지"],
 
     "Count_3": [f"{G4}/3"],
     "Count_2": [f"{G4}/2"],
@@ -89,6 +89,11 @@ PARTS = {
     "Tag_R_Other": [f"{G5}/플레이어2(시작후 2초뒤 없어지게)/상대"],
     "Run_BarFill": [f"{G5}/하단게이지/게이지1"],
     "Run_BarShine": [f"{G5}/하단게이지/게이지2"],
+    # 손잡이를 놓았을 때(FREE) 경고. 빨간 테두리(Warn_RedEdge)는 PSD 에 없어 아래 make_red_edge 로 만든다.
+    "Warn_Dim": [f"{G5W}/배경"],
+    "Warn_Hands": [f"{G5W}/이미지"],
+    "Warn_Text": [f"{G5W}/자막"],
+    "Warn_Icon": [f"{G5W}/아이콘-일정간격 깜빡이게"],
 
     "Button_High": [f"{G6}/고전압 버튼"],
     "Button_Low": [f"{G6}/저전압 버튼"],
@@ -106,7 +111,6 @@ PARTS = {
 # 이미지 없이 자리(좌표)만 필요한 레이어 (텍스트 자리, 같은 그림의 다른 위치)
 RECTS = {
     "Join_Digit": f"{G2A}/카운터/9",
-    "Guide_Gauge": f"{G3}/타임바(5~10초)/게이지",
     "Voltage_Gauge": f"{G6}/타임게이지(5~10초)/게이지",
     "Sale_Gauge": f"{G7}/타임 게이지/게이지",
     "Ranking_Gauge": f"{G8}/타임게이지(5~10초)/게이지",
@@ -134,11 +138,13 @@ RECTS = {
 # ── 85형 PSD ─────────────────────────────────────────
 R85 = "01-랭킹(PPT참조)"
 STATICS_85 = {
-    "Spectator": ["그림자 레이어", "<Clip Group>", "타이틀"],
+    # 제목(타이틀)은 달리는 동안 숨기도록 부품(Spectator_Title)으로 따로 뺀다
+    "Spectator": ["그림자 레이어", "<Clip Group>"],
 }
 RANK_TEXTS_85 = {"4.5 4.4 4.3 4.2 4.1", "3,000 3,000 3,000 3,000 3,000", "26.10.22 1:22:43 26.10.22 1:22:43 26.10.22 1:22:43 26.10.22 1:22:43 26.10.22 1:22:43"}
 PARTS_85 = {
     "Spectator_RecordTag": ["오늘 최고 랭킹"],
+    "Spectator_Title": ["타이틀"],
     "Spectator_Info_1": ["02-내용1"],
     "Spectator_Info_2": ["03-내용2"],
     # Spectator_Ranking 은 아래에서 01-랭킹 그룹의 숫자/시간 텍스트만 빼고 합성한다
@@ -253,6 +259,40 @@ def save_cropped(image, path):
     return (l, t, l + pad_size(r - l), t + pad_size(b - t))
 
 
+def make_red_edge(width, height):
+    """화면 가장자리가 불투명하고 가운데로 갈수록 투명해지는 흰 테두리 (Unity 에서 빨간색으로 칠해 맥박 효과).
+    게임에서 체력이 없을 때처럼 네 변이 고르게 붉어지도록 둥근 사각형(초타원) 거리로 만든다. 부드러운 그림이라 절반 크기로 만든다."""
+    import numpy as np
+    w, h = width // 2, height // 2
+    x = np.linspace(-1, 1, w)[None, :]
+    y = np.linspace(-1, 1, h)[:, None]
+    r = (np.abs(x) ** 4 + np.abs(y) ** 4) ** 0.25
+    t = np.clip((r - 0.8) / (1.0 - 0.8), 0, 1)
+    alpha = t * t * (3 - 2 * t)   # smoothstep
+    rgba = np.zeros((h, w, 4), np.uint8)
+    rgba[..., :3] = 255
+    rgba[..., 3] = (alpha * 255).astype(np.uint8)
+    return Image.fromarray(rgba, "RGBA")
+
+
+# 85형 랭킹 판에서 지울 줄 순위 숫자 (판 그림 기준 x0, y0, x1, y1). 4·5위 자리는 PLAYER 01/02 최근 기록 줄이라
+# 순위가 그때마다 달라서 그림 대신 Unity 글자(Row4_Rank, Row5_Rank)로 쓴다. 발전왕 표 / 판매왕 표(+1031px).
+RANKING_ERASE_BOXES = [(71, 496, 93, 520), (73, 613, 91, 637), (1102, 496, 1124, 520), (1104, 613, 1122, 637)]
+
+
+def erase_boxes(image, boxes, margin=4):
+    """상자 안 글자를 지운다. 줄 바탕이 가로로 부드럽게 바뀌는 그러데이션이라 상자 좌우 바깥 색을 줄마다 직선으로 이어 채운다.
+    이미 지운 그림에 다시 해도 결과가 같다."""
+    import numpy as np
+    a = np.array(image.convert("RGBA")).astype(np.float32)
+    for x0, y0, x1, y1 in boxes:
+        x0, y0, x1, y1 = x0 - margin, y0 - margin, x1 + margin, y1 + margin
+        left, right = a[y0:y1 + 1, x0 - 1], a[y0:y1 + 1, x1 + 1]
+        t = np.linspace(0, 1, x1 - x0 + 3)[1:-1][None, :, None]
+        a[y0:y1 + 1, x0:x1 + 1] = left[:, None] * (1 - t) + right[:, None] * t
+    return Image.fromarray(np.clip(a + 0.5, 0, 255).astype(np.uint8), "RGBA")
+
+
 def export_static(psd, name, paths):
     os.makedirs(STATIC_DIR, exist_ok=True)
     composite(psd, paths).convert("RGBA").save(os.path.join(STATIC_DIR, f"Static_{name}.png"))
@@ -290,6 +330,11 @@ def main():
     print("part Join_Digit_0~9", cell_w, cell_h)
     for name, path in RECTS.items():
         layout[name] = rect_of(find(psd, path).bbox)
+    # 손잡이 경고 빨간 테두리 (화면 전체 자리에 늘려 쓴다)
+    os.makedirs(PARTS_DIR, exist_ok=True)
+    make_red_edge(psd.width, psd.height).save(os.path.join(PARTS_DIR, "Warn_RedEdge.png"))
+    layout["Warn_RedEdge"] = {"x": 0, "y": 0, "w": psd.width, "h": psd.height}
+    print("part Warn_RedEdge (생성)")
 
     # 85형
     psd85 = PSDImage.open(sys.argv[2])
@@ -303,6 +348,8 @@ def main():
     ranking = find(psd85, R85)
     keep = [layer for layer in ranking if not (layer.kind == "type" and " ".join(layer.name.split()) in RANK_TEXTS_85)]
     export_part(psd85, layout, "Spectator_Ranking", composite_layers(psd85, keep))
+    ranking_path = os.path.join(PARTS_DIR, "Spectator_Ranking.png")
+    erase_boxes(Image.open(ranking_path), RANKING_ERASE_BOXES).save(ranking_path)
     for name, path in RECTS_85.items():
         layout[name] = rect_of(find(psd85, path).bbox)
 

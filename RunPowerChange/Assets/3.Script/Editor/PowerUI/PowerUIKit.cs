@@ -33,7 +33,7 @@ public static class PowerUIKit
 
     // 32형 패널 이름 (Panel_xxx 프리팹, Static_xxx 이미지, Guide_xxx 이미지에 같이 쓰인다). WheelSession.State 순서.
     public static readonly string[] PanelNames =
-        { "Idle", "Join", "Guide", "Countdown", "Run", "Voltage", "Sale", "Ranking" };
+        { "Idle", "Join", "Countdown", "Run", "Voltage", "Sale", "Ranking" };
 
     public static string StaticSpritePath(string panel) => $"{StaticDir}/Static_{panel}.png";
     public static string GuidePath(string panel) => $"{GuideDir}/Guide_{panel}.png";
@@ -59,11 +59,14 @@ public static class PowerUIKit
     public static readonly Color OrangeColor = new Color32(250, 114, 85, 255);   // 발전량 숫자
     public static readonly Color GreenColor = new Color32(87, 181, 136, 255);    // 순위 숫자
     public static readonly Color YellowColor = new Color32(251, 176, 59, 255);   // 문구 강조
+    public static readonly Color WarnRedColor = new Color32(240, 70, 70, 255);   // 손잡이 경고 빨간 테두리 (아이들이 무섭지 않게 짙지 않은 빨강) (알파는 HandWarningView 가 맥박으로 바꾼다)
     public const string YellowHex = "#FBB03B";
     public static readonly Color WhiteColor = Color.white;
     // PLAYER 01/02 이름 색 (85형 안내 카드). 3D 레인 색(01 파랑, 02 분홍)에 맞춤
     public static readonly Color Player1Color = new Color32(47, 128, 237, 255);
     public static readonly Color Player2Color = new Color32(236, 56, 140, 255);
+    // 1위 기록 선 표시(오늘/전날 최고 랭킹) 알약 색. 85형 "최고 랭킹 ○m 앞" 연결선에 쓴다
+    public static readonly Color RecordLineColor = new Color32(140, 198, 63, 255);
     public static readonly Color ShadowColor = new Color(0f, 0f, 0f, 0.45f);
 
     #endregion

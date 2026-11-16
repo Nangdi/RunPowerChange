@@ -1,7 +1,6 @@
 {
     "runSeconds": 50.0,
     "countdownSeconds": 3,
-    "guideSeconds": 10.0,
     "joinWaitSeconds": 15.0,
     "readySeconds": 0.0,
     "wheelCircumferenceM": 6.283,
@@ -27,7 +26,9 @@
     "speedometerMaxKmh": 30.0,
     "finishApproachSeconds": 10.0,
     "raceScrollPerMeter": 1.5,
-    "raceGapPerMeter": 0.1,
+    "raceScreenMaxAheadM": 100.0,
+    "spectatorFollowGapM": 20.0,
+    "spectatorQuitSeconds": 3.0,
     "characterAnimMinSpeed": 0.5,
     "characterAnimMaxSpeed": 2.0,
     "characterAnimMaxKmh": 18.0,
@@ -41,8 +42,8 @@
     "sfxMuted": false,
     "bgmFadeSeconds": 1.0,
     "wheels": [
-        { "wheelId": 1, "controllerId": 1, "displayIndex": 0, "simulateKey": "UpArrow" },
-        { "wheelId": 2, "controllerId": 2, "displayIndex": 1, "simulateKey": "W" }
+        { "wheelId": 1, "controllerId": 1, "displayIndex": 0, "simulateKey": "UpArrow", "simulateGripKey": "DownArrow" },
+        { "wheelId": 2, "controllerId": 2, "displayIndex": 1, "simulateKey": "W", "simulateGripKey": "S" }
     ],
     "spectatorDisplayIndex": 2,
     "operatorDisplayIndex": 2

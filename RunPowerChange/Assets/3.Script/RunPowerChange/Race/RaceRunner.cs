@@ -66,6 +66,8 @@ public class RaceRunner : MonoBehaviour
     public float DistanceM { get; private set; }
     public float SpeedMps { get; private set; }
     public bool IsActive => CurrentMode != Mode.Hidden;
+    // 32형 캐릭터가 서 있는 기준 위치 (부모 로컬, 앞뒤 간격 0). 1위 기록 선 높이·출발 위치 기준.
+    public Vector3 CharacterBase => characterBase;
 
     private static readonly int BaseColorId = Shader.PropertyToID("_BaseColor");
     // HDRP Lit 은 _BaseColorMap, URP Lit 은 _BaseMap
@@ -93,6 +95,7 @@ public class RaceRunner : MonoBehaviour
     private readonly Dictionary<Renderer, Material[]> wheelMaterials = new Dictionary<Renderer, Material[]>();
     private bool wheelGhost;
     private bool wheelGhostBuilt;
+    private float wheelTopHeight;
 
     private void Awake()
     {
@@ -100,7 +103,11 @@ public class RaceRunner : MonoBehaviour
         {
             wheelBase = wheel.localPosition;
             foreach (var r in wheel.GetComponentsInChildren<Renderer>(true))
+            {
                 wheelMaterials[r] = r.sharedMaterials;
+                // 바퀴 몸체(납작한 바닥판 제외)의 반지름 = 중심에서 윗면까지 높이 (회전해도 같은 원이라 extents.y 의 최댓값)
+                if (r.bounds.size.y > 0.1f) wheelTopHeight = Mathf.Max(wheelTopHeight, Mathf.Min(r.bounds.extents.y, r.bounds.extents.z));
+            }
         }
         if (character == null) return;
 
@@ -116,6 +123,14 @@ public class RaceRunner : MonoBehaviour
                 originalMaterials[r] = r.sharedMaterials;
         }
     }
+
+    // 85형 바퀴 윗면 가운데 (월드 좌표). 앞 바퀴가 화면 위로 나갔는지, "앞서는 중" 선을 어디에 둘지 볼 때 쓴다.
+    // 바퀴 몸체는 회전 애니메이션으로 돌고 아래에 긴 화살표 바닥판이 붙어 있어 메시 범위로 구하면 흔들리고 뒤로 밀린다.
+    // 그래서 바퀴 중심(wheel 위치)에 시작할 때 한 번 잰 높이(wheelTopHeight)를 더한다.
+    public Vector3 WheelTopPoint => wheel != null ? wheel.position + Vector3.up * wheelTopHeight : transform.position;
+    // 85형 바퀴 중심·아래 끝 (월드 좌표)
+    public Vector3 WheelCenterPoint => wheel != null ? wheel.position : transform.position;
+    public Vector3 WheelBottomPoint => wheel != null ? wheel.position - Vector3.up * wheelTopHeight : transform.position;
 
     // 쳇바퀴 screenWheelId 화면에 그려지는 이 레인 캐릭터의 머리 꼭대기 위 (ME 표시 자리, 월드 좌표).
     // 달리는 동작에 따라 머리 높이가 바뀌므로 메시 범위로 구한다.
@@ -203,7 +218,8 @@ public class RaceRunner : MonoBehaviour
             }
         }
 
-        wheelGapZ = Mathf.Lerp(wheelGapZ, IsActive ? stage.GapZ(DistanceM) : 0f, t);
+        // 85형 시점이 바뀐 프레임에는 부드럽게 옮기지 않고 바로 새 자리에 둔다
+        wheelGapZ = Mathf.Lerp(wheelGapZ, IsActive ? stage.GapZ(DistanceM) : 0f, stage.SpectatorCut ? 1f : t);
         if (wheel != null) wheel.localPosition = wheelBase + forward * wheelGapZ;
         snapGap = false;
 
@@ -253,7 +269,8 @@ public class RaceRunner : MonoBehaviour
         }
 
         // 회차가 열린 뒤에는 참가자 캐릭터만 보인다. 회차가 없을 때(대기)는 두 캐릭터가 출발선에 서 있다.
-        if (session != null && (!inRound || participant))
+        // 화면을 "사용 안 함"으로 둔 쳇바퀴 레인은 비워 둔다 (혼자 달리는 회차의 1위 고스트 레인으로만 쓰인다).
+        if (session != null && session.Enabled && (!inRound || participant))
         {
             mode = Mode.Player;
             distance = session.DistanceM;

@@ -2,6 +2,7 @@ using UnityEngine;
 
 // 경주 장면 카메라. 위치와 각도는 디자이너 맵의 카메라를 그대로 쓰고, 출력 디스플레이와 보이는 레이어만 정한다.
 //  - Wheel     : 쳇바퀴 32형 (레이스 카메라). 출력 디스플레이 = Setting.json wheels[].displayIndex. 이 화면 기준 캐릭터 벌(Screen{n})이 보인다.
+//                displayIndex 가 -1(사용 안 함)이면 카메라를 끈다.
 //  - Spectator : 85형 (결과 카메라). 출력 디스플레이 = spectatorDisplayIndex. 바퀴 2개와 최고 랭킹 선이 보인다.
 public class RaceCamera : MonoBehaviour
 {
@@ -40,9 +41,8 @@ public class RaceCamera : MonoBehaviour
     {
         var cfg = JsonManager.instance.gameDynamicData;
         if (screen == Target.Spectator) return cfg.spectatorDisplayIndex;
-        foreach (var w in cfg.wheels)
-            if (w != null && w.wheelId == wheelId) return w.displayIndex;
-        return cam.targetDisplay;
+        var w = cfg.Wheel(wheelId);
+        return w != null ? w.displayIndex : cam.targetDisplay;
     }
 
     // 32형은 85형 전용 레이어와 다른 화면의 캐릭터 벌을, 85형은 캐릭터 레이어를 뺀다

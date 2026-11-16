@@ -106,6 +106,16 @@ public class WheelRankingStore
         if (RollDay()) Save();
     }
 
+    // 이 쳇바퀴의 오늘 가장 최근 기록 (85형 랭킹 표의 PLAYER 01/02 줄). 없으면 null.
+    public PowerRecord Latest
+    {
+        get
+        {
+            RollDay();
+            return data.records.Count > 0 ? data.records[data.records.Count - 1] : null;
+        }
+    }
+
     public PowerRecord Add(PowerRecord record)
     {
         RollDay();

@@ -26,7 +26,7 @@
 
 | key | 파일 | 나오는 때 |
 |---|---|---|
-| `idle` | bgm_idle.wav | 대기 화면, 참가 대기, 준비, 체험 안내 |
+| `idle` | bgm_idle.wav | 대기 화면, 참가 대기, 준비 |
 | `race` | bgm_race.wav | 카운트다운, 달리기 |
 | `result` | bgm_result.wav | 달리기가 끝난 뒤 (전압 선택, 판매, 랭킹) |
 

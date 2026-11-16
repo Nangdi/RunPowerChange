@@ -4,6 +4,7 @@ using UnityEngine;
 // 연결된 WheelSession 의 상태에 맞춰 패널을 켜고 끈다.
 // 대기 중(Idle)인데 옆 쳇바퀴가 먼저 시작해 합류할 수 있으면 대기화면 대신 참가 대기(참여하기) 화면을 보여 준다.
 // 캔버스 출력 디스플레이는 Setting.json wheels[].displayIndex 를 따른다. 설정창에서 바꾸면 바로 옮긴다 (DisplayRouting).
+// displayIndex 가 -1(사용 안 함, 모니터 고장 등)이면 캔버스를 끈다. 그 쳇바퀴는 체험을 시작할 수 없다 (WheelSession.Enabled).
 public class WheelScreen : MonoBehaviour
 {
     [Tooltip("이 화면이 보여줄 쳇바퀴 세션 (씬 인스턴스에서 연결)")]
@@ -15,7 +16,6 @@ public class WheelScreen : MonoBehaviour
     [Header("패널")]
     [SerializeField] private IdlePanel idlePanel;
     [SerializeField] private JoinPanel joinPanel;
-    [SerializeField] private GuidePanel guidePanel;
     [SerializeField] private CountdownPanel countdownPanel;
     [SerializeField] private RunPanel runPanel;
     [SerializeField] private VoltagePanel voltagePanel;
@@ -30,7 +30,7 @@ public class WheelScreen : MonoBehaviour
     {
         panels = new WheelPanel[]
         {
-            idlePanel, joinPanel, guidePanel, countdownPanel, runPanel, voltagePanel, salePanel, rankingPanel,
+            idlePanel, joinPanel, countdownPanel, runPanel, voltagePanel, salePanel, rankingPanel,
         };
         foreach (var panel in panels)
         {
@@ -63,10 +63,11 @@ public class WheelScreen : MonoBehaviour
     private void ApplyDisplay()
     {
         if (canvas == null) return;
-        foreach (var w in JsonManager.instance.gameDynamicData.wheels)
+        var w = JsonManager.instance.gameDynamicData.Wheel(session.WheelId);
+        if (w != null)
         {
-            if (w == null || w.wheelId != session.WheelId) continue;
             DisplayRouting.ApplyTo(canvas, w.displayIndex);
+            if (!w.Enabled) Debug.Log($"{name}: 쳇바퀴 {session.WheelId} 화면 사용 안함 - 캔버스 끔");
             return;
         }
         Debug.LogWarning($"{name}: Setting.json 에 wheelId {session.WheelId} 가 없어 Display {canvas.targetDisplay + 1} 그대로 사용");

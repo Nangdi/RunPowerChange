@@ -5,7 +5,7 @@ using UnityEngine;
 // 쳇바퀴 1대(체험자 1명)의 체험 흐름. 달리기까지는 GameRound 가 두 쳇바퀴를 같은 회차로 묶어 진행하고,
 // 달리기가 끝난 뒤 전압 선택·판매·랭킹은 각자 진행한다.
 //
-// Idle ─시작─→ Join ─(회차)→ Guide → Countdown → Run → SelectVoltage → Sale → Ranking → Idle
+// Idle ─시작─→ Join ─(회차)→ Countdown → Run → SelectVoltage → Sale → Ranking → Idle
 // 옆 쳇바퀴의 회차가 진행 중이면(합류 시간이 지남) 시작할 수 없다. 대기화면에 "체험 중" 안내가 나온다.
 //
 // - 캐릭터는 쳇바퀴마다 정해져 있다 (1 = 왼쪽 파랑 레인 사람, 2 = 오른쪽 분홍 레인 공룡).
@@ -16,7 +16,7 @@ using UnityEngine;
 // - 달리기 기록(고스트·85형 최고 랭킹 선용)은 달리기가 끝날 때 RaceRecordStore 에 넘긴다.
 public class WheelSession : MonoBehaviour
 {
-    public enum State { Idle, Join, Guide, Countdown, Run, SelectVoltage, Sale, Ranking }
+    public enum State { Idle, Join, Countdown, Run, SelectVoltage, Sale, Ranking }
 
     [Tooltip("Setting.json wheels[].wheelId")]
     [SerializeField] private int wheelId = 1;
@@ -31,6 +31,15 @@ public class WheelSession : MonoBehaviour
     private KeyCode DebugStartKeypad => wheelId >= 1 && wheelId <= 9 ? KeyCode.Keypad0 + wheelId : KeyCode.None;
 
     public int WheelId => wheelId;
+    // 설정창에서 이 쳇바퀴 화면을 "사용 안 함"(displayIndex -1)으로 두면 false. 체험을 시작·합류할 수 없다.
+    public bool Enabled
+    {
+        get
+        {
+            var w = JsonManager.instance != null ? Config.Wheel(wheelId) : null;
+            return w == null || w.Enabled;
+        }
+    }
     public State Current { get; private set; } = State.Idle;
     // 현재 상태에 들어온 뒤 지난 시간(초)
     public float StateElapsed => Time.unscaledTime - stateEnterTime;
@@ -46,7 +55,9 @@ public class WheelSession : MonoBehaviour
     public float RunElapsed { get; private set; }
     public float RunRemaining => Mathf.Max(0f, RunDuration - RunElapsed);
     public float SpeedKmh => sensor != null && IsRunning ? sensor.SpeedKmh : 0f;
-    public float Watt => IsRunning ? PowerModel.WattFromSpeed(SpeedKmh, Config) : 0f;
+    // 손잡이를 놓은 상태 (컨트롤러가 FREE 를 보낸 뒤 HOLD 전). 발전 중에만 true. 속도·거리는 그대로 가고 발전량만 멈춘다.
+    public bool HandsReleased => IsRunning && sensor != null && sensor.GripReleased;
+    public float Watt => IsRunning && !HandsReleased ? PowerModel.WattFromSpeed(SpeedKmh, Config) : 0f;
     public float EnergyWh { get; private set; }
     public float DistanceM { get; private set; }
     public float MaxSpeedKmh { get; private set; }
@@ -89,6 +100,36 @@ public class WheelSession : MonoBehaviour
         }
     }
 
+    // 달리는 중 "지금 발전량으로 끝나면 오늘 몇 등" (발전왕 종합순위 기준, 발전 화면 안내용).
+    // 오늘 저장된 기록들의 최종 발전량과 지금까지의 발전량을 비교하고, 같이 달리는 상대의 지금 발전량도 넣는다.
+    public int LiveEnergyRank
+    {
+        get
+        {
+            int rank = WheelRankingStore.TotalRank(WheelRankingStore.Kind.Energy, EnergyWh);
+            foreach (var other in RunningOthers())
+                if (other.EnergyWh > EnergyWh) rank++;
+            return rank;
+        }
+    }
+    // LiveEnergyRank 의 전체 인원 (오늘 기록 + 지금 달리는 사람)
+    public int LiveTotal
+    {
+        get
+        {
+            int n = WheelRankingStore.TotalCount + 1;
+            foreach (var _ in RunningOthers()) n++;
+            return n;
+        }
+    }
+
+    private IEnumerable<WheelSession> RunningOthers()
+    {
+        if (Round == null) yield break;
+        foreach (var p in Round.Participants)
+            if (p != null && p != this && p.Current == State.Run) yield return p;
+    }
+
     // 같은 회차에서 달리기를 끝내고 아직 기록을 저장하지 않은 다른 체험자
     private IEnumerable<WheelSession> PendingOthers()
     {
@@ -101,7 +142,6 @@ public class WheelSession : MonoBehaviour
     {
         get
         {
-            if (Current == State.Guide) return Round != null ? Round.GuideRemaining01 : 0f;
             if (Current == State.SelectVoltage)
             {
                 float idle = Config.idleTimeoutSeconds;
@@ -159,6 +199,16 @@ public class WheelSession : MonoBehaviour
     private void Update()
     {
         if (JsonManager.instance == null) return; // 앱 종료 중
+        if (!Enabled)
+        {
+            // 체험 중에 사용 안 함으로 바뀌면 기록 없이 회차에서 빠진다
+            if (Current != State.Idle)
+            {
+                Debug.Log($"[Wheel {wheelId}] 화면 사용 안 함 - 체험 중단, 대기 상태로");
+                GoTo(State.Idle);
+            }
+            return;
+        }
         if (Current == State.Idle && DebugStartKeyDown())
         {
             Debug.Log($"[Wheel {wheelId}] 디버그 키로 체험 시작");
@@ -201,6 +251,11 @@ public class WheelSession : MonoBehaviour
     {
         NotifyInput();
         if (Current != State.Idle || Round == null) return;
+        if (!Enabled)
+        {
+            Debug.Log($"[Wheel {wheelId}] 화면 사용 안 함 - 체험 시작 무시");
+            return;
+        }
         if (Round.RequestJoin(this)) GoTo(State.Join);
     }
 
@@ -224,8 +279,6 @@ public class WheelSession : MonoBehaviour
     }
 
     // ── GameRound 에서 호출 ─────────────────────────────
-
-    public void BeginGuide() => GoTo(State.Guide);
 
     public void BeginCountdown()
     {
