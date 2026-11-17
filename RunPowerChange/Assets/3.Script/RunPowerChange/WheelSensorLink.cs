@@ -7,8 +7,8 @@ using UnityEngine;
 //
 // 센서는 쳇바퀴 안쪽 기어에 붙어 있어, 쳇바퀴 1회전에 회전 신호(R1)가 pulsesPerRotation 개(현장 20개) 온다.
 // 손잡이: 회전 신호와 따로, 손잡이를 잡으면 HOLD, 놓으면 FREE 가 상태가 바뀔 때 온다.
-// FREE 를 받으면 다음 HOLD 까지 "손잡이 놓음"(GripReleased)으로 본다 → 세션이 발전을 멈추고 경고를 띄운다.
-// 거리·속도는 손잡이 상태와 관계없이 R1 로 계산한다. 처음(아무 손잡이 신호도 받기 전)은 잡음으로 본다.
+// FREE 를 받으면 다음 HOLD 까지 "손잡이 놓음"(GripReleased)으로 본다 → 세션이 속도·거리·발전을 멈추고 경고를 띄운다.
+// 센서의 거리·속도는 손잡이 상태와 관계없이 R1 로 계산한다 (멈추는 것은 세션이 한다. 디버그 패널에는 센서 값 그대로). 처음(아무 손잡이 신호도 받기 전)은 잡음으로 본다.
 // 신호 1개 = DistancePerPulseM (둘레 / pulsesPerRotation). 속도·거리는 여기에 속도 배율(speedMultiplier)을 곱한
 // 게임 값(GameDistancePerPulseM)으로 계산한다 (쳇바퀴가 무거워 실제 속도가 낮게 나오므로). 센서 튐 판정만 실제 값 기준.
 //  - 속도: 최근 speedWindowSeconds 동안 들어온 신호 수로 계산한다. 신호가 잦아(15km/h 에 초당 약 13개)
@@ -283,7 +283,7 @@ public class WheelSensorLink : SerialPortManager
         foreach (var s in Sensors)
         {
             ShortcutHelp.Register(this, s.SimulateKey, $"쳇바퀴 {s.WheelId} 1바퀴 돌리기 (회전 신호 R1 을 1바퀴분 보냄, 누른 간격으로 속도 계산)", "모든 화면, 발전 중에만 기록됨");
-            ShortcutHelp.Register(this, s.GripKey, $"쳇바퀴 {s.WheelId} 손잡이 잡음/놓음 전환 (HOLD/FREE 신호 흉내, 놓음이면 발전량 멈춤 + 손잡이 경고)", "모든 화면, 경고는 발전 중에만");
+            ShortcutHelp.Register(this, s.GripKey, $"쳇바퀴 {s.WheelId} 손잡이 잡음/놓음 전환 (HOLD/FREE 신호 흉내, 놓음이면 속도·거리·발전량 멈춤 + 손잡이 경고)", "모든 화면, 경고는 발전 중에만");
         }
     }
 

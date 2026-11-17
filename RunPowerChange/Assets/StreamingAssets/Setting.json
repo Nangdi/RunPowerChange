@@ -28,6 +28,7 @@
     "raceScrollPerMeter": 1.5,
     "raceScreenMaxAheadM": 100.0,
     "spectatorFollowGapM": 20.0,
+    "spectatorReturnGapM": 10.0,
     "spectatorQuitSeconds": 3.0,
     "characterAnimMinSpeed": 0.5,
     "characterAnimMaxSpeed": 2.0,

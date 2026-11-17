@@ -120,7 +120,24 @@ public static class PowerPlayTest
     {
         Start(dir, false, false, false, false, false, false);
         SessionState.SetBool(FollowKey, true);
+        SessionState.SetBool(GripKey, false);
     }
+
+    // 손잡이 점검: 2인 경주를 같은 속도로 30초 달리고, 쳇바퀴 1 만 GripScript 구간 동안 손잡이를 놓는다 (FREE → HOLD).
+    // 놓은 동안 쳇바퀴 1 의 속도·거리·발전량이 멈추고 다시 잡으면 이어지는지 follow.csv 의 sp1·d1·e1·hr1 열로 본다.
+    public static void StartGrip(string dir)
+    {
+        StartFollow(dir);
+        SessionState.SetBool(GripKey, true);
+    }
+
+    private const string GripKey = "PowerPlayTest.GripScenario";
+
+    // (달리기 시작 후 초, 쳇바퀴 1 km/h, 쳇바퀴 2 km/h)
+    private static readonly float[,] GripScript = { { 0f, 12f, 12f } };
+    // 쳇바퀴 1 손잡이를 놓는 구간 (달리기 시작 후 초)
+    private const float GripFreeAt = 10f, GripHoldAt = 16f;
+    private static bool gripSentFree;
 
     // (달리기 시작 후 초, 쳇바퀴 1 km/h, 쳇바퀴 2 km/h)
     private static readonly float[,] FollowScript =
@@ -137,9 +154,12 @@ public static class PowerPlayTest
         { 86f, 13f, 13f },    // 둘 다 같은 속도
     };
 
+    private static bool GripMode => SessionState.GetBool(GripKey, false);
+
     private static void BuildFollowSteps(GameDynamicData c)
     {
-        c.runSeconds = 100f;
+        c.runSeconds = GripMode ? 30f : 100f;
+        gripSentFree = false;
         Add(1f, "follow_start_w1", () => Session(1).StartExperience());
         Add(2.2f, "follow_start_w2", () => Session(2).StartExperience());
         Add(4f, "follow_wait_run", () => Log("  [follow] 달리기 시작"), () => GameRound.Instance.Current == GameRound.Phase.Run);
@@ -154,11 +174,20 @@ public static class PowerPlayTest
         var round = GameRound.Instance;
         if (round == null || round.Current != GameRound.Phase.Run) return;
         float t = round.RunElapsed;
+        float[,] script = GripMode ? GripScript : FollowScript;
         int row = 0;
-        for (int i = 0; i < FollowScript.GetLength(0); i++)
-            if (t >= FollowScript[i, 0]) row = i;
-        speedKmh[1] = FollowScript[row, 1];
-        speedKmh[2] = FollowScript[row, 2];
+        for (int i = 0; i < script.GetLength(0); i++)
+            if (t >= script[i, 0]) row = i;
+        speedKmh[1] = script[row, 1];
+        speedKmh[2] = script[row, 2];
+
+        if (!GripMode) return;
+        bool free = t >= GripFreeAt && t < GripHoldAt;
+        if (free == gripSentFree) return;
+        gripSentFree = free;
+        var sensor = WheelSensorLink.Link != null ? WheelSensorLink.Link.GetSensor(1) : null;
+        string note = sensor?.ApplyGrip(Time.unscaledTime, free);
+        Log($"  [grip] {t:0.0}s 쳇바퀴 1 {(free ? "FREE" : "HOLD")} → {note}");
     }
 
     private static readonly StringBuilder followTrace = new StringBuilder();
@@ -178,7 +207,7 @@ public static class PowerPlayTest
         var spec = UnityEngine.Object.FindObjectOfType<SpectatorScreen>();
         var so = spec != null ? new SerializedObject(spec) : null;
         if (followTrace.Length == 0)
-            followTrace.AppendLine("frame,run,kmh1,kmh2,d1,d2,base,lead,cut,tq,lq,vy1,vy2,ahead1,ahead2,behind1,behind2,record");
+            followTrace.AppendLine("frame,run,kmh1,kmh2,d1,d2,base,lead,cut,tq,lq,vy1,vy2,ahead1,ahead2,behind1,behind2,record,sd1,sd2,e1,e2,sp1,sp2,hr1,hr2");
         string Active(string prop, int i)
         {
             var arr = so?.FindProperty(prop);
@@ -194,7 +223,9 @@ public static class PowerPlayTest
         followTrace.AppendLine($"{Time.frameCount},{round.RunElapsed:0.000},{speedKmh[1]:0.#},{speedKmh[2]:0.#}," +
             $"{stage.Runner(1).DistanceM:0.00},{stage.Runner(2).DistanceM:0.00},{stage.SpectatorBase:0.00}," +
             $"{(stage.SpectatorFollowingLeader ? 1 : 0)},{(stage.SpectatorCut ? 1 : 0)},{(stage.TrailingQuit ? 1 : 0)},{(stage.LeadingQuit ? 1 : 0)}," +
-            $"{Vy(1):0.0000},{Vy(2):0.0000},{Active("aheadMarkers", 0)},{Active("aheadMarkers", 1)},{Active("behindMarkers", 0)},{Active("behindMarkers", 1)},{Active("aheadMarkers", 2)}");
+            $"{Vy(1):0.0000},{Vy(2):0.0000},{Active("aheadMarkers", 0)},{Active("aheadMarkers", 1)},{Active("behindMarkers", 0)},{Active("behindMarkers", 1)},{Active("aheadMarkers", 2)}," +
+            $"{Session(1).DistanceM:0.00},{Session(2).DistanceM:0.00},{Session(1).EnergyWh:0.0000},{Session(2).EnergyWh:0.0000}," +
+            $"{Session(1).SpeedKmh:0.0},{Session(2).SpeedKmh:0.0},{(Session(1).HandsReleased ? 1 : 0)},{(Session(2).HandsReleased ? 1 : 0)}");
     }
 
     private static void WritePreviousDayLeader()

@@ -14,10 +14,10 @@ using UnityEngine;
 //    2인 경주에서 아래 경우에는 기준을 앞선 쪽으로 바꿔 앞선 사람 시점으로 바로 끊어 바꾼다 (UpdateSpectatorFollow):
 //      · 거리 차가 spectatorFollowGapM 이상 벌어지면
 //      · 뒤처진 사람이 spectatorQuitSeconds 동안 멈춰 있으면(중도포기)
-//    거리 차 때문에 바뀐 앞선 사람 시점은 뒤처진 사람이 따라잡아 나란히 서면 끝난다 (그때는 두 시점이 같은 화면이라 바퀴가 튀지 않는다).
+//    거리 차 때문에 바뀐 앞선 사람 시점은 거리 차가 spectatorReturnGapM 밑으로 다시 좁혀지면 뒤처진 사람 시점으로 바로 끊어 돌아온다.
 //    포기 때문에 바뀐 앞선 사람 시점은 포기한 사람이 다시 달리면 바로 끝난다 (거리 차가 기준보다 작으면 뒤처진 사람 시점).
 //    반대로 앞선 사람이 멈춰 있으면 거리 차와 관계없이 뒤처진(계속 달리는) 사람 시점이다. 둘 다 멈추면 지금 시점 그대로.
-//    그래서 화면이 끊겨 바뀌는 것은 거리 차가 벌어질 때와 한 사람이 포기할 때뿐이고, 역전은 끊김 없이 이어진다.
+//    그래서 화면이 끊겨 바뀌는 것은 거리 차가 벌어지거나 다시 좁혀질 때와 한 사람이 포기할 때뿐이고, 역전은 끊김 없이 이어진다.
 //    앞선 사람 시점에서는 앞선 바퀴가 원래 자리, 뒤처진 바퀴는 화면 아래로 빠진다. 85형 카메라는 원근이 커서
 //    약 10m 만 앞서도 앞 바퀴가 화면 위쪽 발전량 글자 뒤로 작아지므로, 앞 바퀴를 그 거리에 붙여 두지 않고 원래 자리로 데려온다.
 //    혼자 달릴 때(1위 고스트)는 쓰지 않는다.
@@ -199,7 +199,7 @@ public class RaceStage : MonoBehaviour
     //  1) 한 사람만 멈춰 있으면(spectatorQuitSeconds 이상, 중도포기) 계속 달리는 사람 시점
     //     - 뒤처진 사람이 포기: 앞선 사람 시점 / 앞선 사람이 포기: 뒤처진 사람 시점 (거리 차와 관계없이)
     //  2) 둘 다 멈췄으면 지금 시점 그대로
-    //  3) 둘 다 달리면 거리 차가 spectatorFollowGapM 이상일 때 앞선 사람 시점, 나란히 서면(역전 순간) 뒤처진 사람 시점.
+    //  3) 둘 다 달리면 거리 차가 spectatorFollowGapM 이상일 때 앞선 사람 시점, spectatorReturnGapM 밑으로 좁혀지면 뒤처진 사람 시점.
     //     포기 때문에 앞선 사람 시점이었으면 포기한 사람이 다시 달릴 때 바로 뒤처진 사람 시점
     private void UpdateSpectatorFollow(float dt)
     {
@@ -240,9 +240,9 @@ public class RaceStage : MonoBehaviour
             else if (cfg.spectatorFollowGapM > 0f && gap >= cfg.spectatorFollowGapM) { followLead = true; followByGap = true; }
             // 포기 때문에 바뀐 앞선 사람 시점은 포기한 사람이 다시 달리면 바로 끝낸다 (거리 차가 기준보다 작으면 뒤처진 사람 시점이 맞으므로)
             else if (followLead && !followByGap) followLead = false;
-            // 거리 차 때문에 바뀐 앞선 사람 시점은 뒤처진 사람이 따라잡아 나란히 설 때 끝낸다. 그때는 두 시점이 같은 화면이라 바퀴가 움직이지 않는다.
-            // (중간 거리에서 돌아오면 바퀴가 그만큼 튀고, 역전한 뒤 다시 벌어지면 또 바뀌어 화면이 자꾸 바뀐다)
-            else if (gap < SideBySideM || cfg.spectatorFollowGapM <= 0f) followLead = false;
+            // 거리 차 때문에 바뀐 앞선 사람 시점은 뒤처진 사람이 따라와 거리 차가 spectatorReturnGapM 밑으로 좁혀지면 끝낸다 (바로 끊어 바꿈).
+            // 바꾸는 기준(spectatorFollowGapM)보다 낮은 값에서 돌아와야 그 근처에서 화면이 왔다 갔다 하지 않는다.
+            else if (cfg.spectatorFollowGapM <= 0f || gap < ReturnGapM(cfg)) followLead = false;
         }
         else if (round == null || !round.RaceActive || round.Current < GameRound.Phase.Run)
         {
@@ -254,6 +254,10 @@ public class RaceStage : MonoBehaviour
         else if (running) spectatorShift = followLead ? gap : 0f;
         SpectatorCut = followLead != wasFollowing && gap >= SideBySideM;
     }
+
+    // 앞선 사람 시점에서 뒤처진 사람 시점으로 돌아오는 거리 차(m). 바꾸는 기준보다 1m 이상 작게, 나란히(SideBySideM) 이상으로.
+    private static float ReturnGapM(GameDynamicData cfg) =>
+        Mathf.Max(SideBySideM, Mathf.Min(cfg.spectatorReturnGapM, cfg.spectatorFollowGapM - 1f));
 
     // 이 레인 체험자가 spectatorQuitSeconds 이상 멈춰 있는지 (0 이면 끔)
     private bool Quit(RaceRunner r, GameDynamicData cfg)

@@ -54,8 +54,11 @@ public class WheelSession : MonoBehaviour
     public float RunDuration => Mathf.Max(1f, Config.runSeconds);
     public float RunElapsed { get; private set; }
     public float RunRemaining => Mathf.Max(0f, RunDuration - RunElapsed);
-    public float SpeedKmh => sensor != null && IsRunning ? sensor.SpeedKmh : 0f;
-    // 손잡이를 놓은 상태 (컨트롤러가 FREE 를 보낸 뒤 HOLD 전). 발전 중에만 true. 속도·거리는 그대로 가고 발전량만 멈춘다.
+    // 손잡이를 놓은 동안은 0 (속도계·캐릭터가 멈춘다)
+    public float SpeedKmh => sensor != null && IsRunning && !HandsReleased ? sensor.SpeedKmh : 0f;
+    // 손잡이를 놓은 상태 (컨트롤러가 FREE 를 보낸 뒤 HOLD 전). 발전 중에만 true.
+    // 놓은 동안은 쳇바퀴가 돌아도 속도·거리·발전량이 모두 멈춘다 (3D 캐릭터도 제자리). 다시 잡으면 그 자리부터 이어진다.
+    // 거리와 발전량이 같이 멈춰야 화면의 앞뒤(거리)와 승패·랭킹(발전량)이 어긋나지 않는다.
     public bool HandsReleased => IsRunning && sensor != null && sensor.GripReleased;
     public float Watt => IsRunning && !HandsReleased ? PowerModel.WattFromSpeed(SpeedKmh, Config) : 0f;
     public float EnergyWh { get; private set; }
@@ -162,7 +165,8 @@ public class WheelSession : MonoBehaviour
     private static GameDynamicData Config => JsonManager.instance.gameDynamicData;
 
     private WheelSensor sensor;
-    private double runStartDistance;
+    // 직전 TickRun 때 센서 누적거리. 손잡이를 잡고 있는 동안 늘어난 만큼만 체험 거리에 더한다.
+    private double lastSensorDistance;
     private float stateEnterTime;
     private float lastInputTime;
     private RaceTrack track;
@@ -289,7 +293,7 @@ public class WheelSession : MonoBehaviour
     public void BeginRun()
     {
         ResetRunValues();
-        runStartDistance = sensor != null ? sensor.TotalDistanceM : 0d;
+        lastSensorDistance = sensor != null ? sensor.TotalDistanceM : 0d;
         track = new RaceTrack { wheelId = wheelId, characterIndex = CharacterIndex };
         track.samples.Add(0f);
         nextSampleTime = RaceTrack.SampleSeconds;
@@ -354,7 +358,12 @@ public class WheelSession : MonoBehaviour
         float elapsed = Round != null ? Round.RunElapsed : Mathf.Min(RunDuration, RunElapsed + dt);
         float runDt = Mathf.Max(0f, elapsed - RunElapsed);
         RunElapsed = elapsed;
-        if (sensor != null) DistanceM = (float)(sensor.TotalDistanceM - runStartDistance);
+        if (sensor != null)
+        {
+            double now = sensor.TotalDistanceM;
+            if (!HandsReleased) DistanceM += Mathf.Max(0f, (float)(now - lastSensorDistance));
+            lastSensorDistance = now;
+        }
         EnergyWh += Watt * runDt / 3600f;
         MaxSpeedKmh = Mathf.Max(MaxSpeedKmh, SpeedKmh);
 
